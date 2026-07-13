@@ -1,0 +1,69 @@
+[build-system]
+requires = ["setuptools>=64.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "graphforge"
+version = "0.1.0"
+description = "A type-safe, composable graph execution framework for LLM applications — inspired by LangGraph, guided by LangChain's strengths, engineered to avoid both teams' mistakes."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+    { name = "GraphForge Contributors" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pydantic>=2.0,<3",
+    "typing_extensions>=4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/carlos07281988/GraphForge"
+Repository = "https://github.com/carlos07281988/GraphForge.git"
+
+[tool.setuptools.packages.find]
+include = ["graphforge*"]
+
+[tool.setuptools.package-data]
+graphforge = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+filterwarnings = ["error"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "ARG"]
+
+[tool.mypy]
+python_version = "3.9"
+strict = true
+show_error_codes = true
+enable_error_code = ["explicit-override", "redundant-expr", "truthy-bool"]
+warn_unused_ignores = true
+ignore_missing_imports = true
+disallow_any_unimported = false
+disallow_any_expr = false
+disallow_any_decorated = false
+disallow_any_explicit = false
+disallow_any_generics = false
+disallow_subclassing_any = false
+
+[tool.codespell]
+skip = ".git,__pycache__"
+quiet-level = 3
