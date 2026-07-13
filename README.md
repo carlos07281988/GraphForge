@@ -579,7 +579,7 @@ execution, streaming, checkpointing, callbacks, and pipelines.
 - [x] SQLite checkpointer — persistent state storage with full CRUD, metadata, and thread safety
 - [x] Parallel / fan-out node execution — add_fanout() API, async parallel via asyncio.gather, sync sequential, join support
 - [ ] Graph visualisation (graphviz / networkx export)
-- [ ] Subgraph checkpoint isolation
+- [x] Subgraph checkpoint isolation — automatic thread_id prefix for nested graphs, shared checkpointer support
 - [ ] Redis checkpointer
 - [ ] Pydantic v1 compatibility
 

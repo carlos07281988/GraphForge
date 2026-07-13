@@ -164,7 +164,12 @@ class Node(Generic[StateT]):
         if not isinstance(compiled, CompiledGraph):
             raise TypeError(f"Node '{self._name}' is not a CompiledGraph.")
         logger.debug("Node._run_subgraph(%r)", self._name)
-        return compiled.invoke(state)
+        # Isolate subgraph checkpoints
+        config = {"thread_id": f"sg:{self._name}"}
+        result = compiled.invoke(state, config=config)
+        if hasattr(result, "model_dump"):
+            return result.model_dump()
+        return dict(result)
 
     async def _arun_subgraph(self, state: StateT) -> StateUpdate:
         from graphforge._graph import CompiledGraph
@@ -173,7 +178,12 @@ class Node(Generic[StateT]):
         if not isinstance(compiled, CompiledGraph):
             raise TypeError(f"Node '{self._name}' is not a CompiledGraph.")
         logger.debug("Node._arun_subgraph(%r)", self._name)
-        return await compiled.ainvoke(state)
+        # Isolate subgraph checkpoints
+        config = {"thread_id": f"sg:{self._name}"}
+        result = await compiled.ainvoke(state, config=config)
+        if hasattr(result, "model_dump"):
+            return result.model_dump()
+        return dict(result)
 
     def _run_pipeline(self, state: StateT) -> StateUpdate:
         from graphforge.pipeline import Pipeline
