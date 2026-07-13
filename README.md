@@ -1,16 +1,32 @@
-<p align="center">
-  <br/>
-  <code>graphforge</code>
-  <br/>
-  <em>Type-safe graph execution for LLM applications</em>
-</p>
+<div align="center">
 
----
+<pre width="80">
+   ________                       __     ____             __
+  / ____/  _____  ____   ____ _  / /__  / __/  ____ ___  / /_
+ / / __   / _ \ / __ \ / __ `/ / //_/ / /_   / __// _  |/ __/
+/ /_/ /  /  __// /_/ // /_/ / / ,<   / __/ _/ /_ / ,__// /_
+\____/   \___/ \___/ \__, / /_/|_| /_/   (_)___//_/    \__/
+                    /____/
+</pre>
 
-**GraphForge** is a Python framework for building stateful, composable execution graphs.
-It is inspired by [LangGraph](https://github.com/langchain-ai/langgraph)'s state-graph model
-and guided by [LangChain](https://github.com/langchain-ai/langchain)'s design patterns,
-while deliberately avoiding the pitfalls of both.
+**GraphForge** · _A type-safe, composable graph execution framework for LLM applications._
+
+<br/>
+
+[![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?style=flat&logo=python)](https://www.python.org)
+[![Pydantic v2](https://img.shields.io/badge/pydantic-v2-4A90D9?style=flat&logo=python)](https://docs.pydantic.dev)
+[![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat)](LICENSE)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat)](https://github.com/carlos07281988/GraphForge/pulls)
+
+<br/>
+
+</div>
+
+**GraphForge** is a Python framework for building **stateful, composable execution graphs**
+for LLM-powered applications. It takes the state-graph model popularised by
+[LangGraph](https://github.com/langchain-ai/langgraph), enforces **type safety** from the
+ground up, makes **state management explicit**, and keeps the **abstraction surface minimal** —
+while deliberately avoiding the design mistakes of both LangGraph and LangChain.
 
 ```python
 from graphforge import Graph, GraphState, node_field, Append, configure_logging
