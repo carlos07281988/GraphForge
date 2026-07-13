@@ -136,13 +136,7 @@ class Pipeline(Generic[StateT]):
 # Helpers
 # ---------------------------------------------------------------------------
 
-
-def _dump(state: Any) -> Dict[str, Any]:
-    if hasattr(state, "model_dump"):
-        return state.model_dump()
-    if isinstance(state, dict):
-        return state
-    return dict(state)
+from graphforge._executor import _dump  # noqa: E402
 
 
 def _reify(

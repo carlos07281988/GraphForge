@@ -112,6 +112,7 @@ class InMemoryCheckpointer(Checkpointer[StateT]):
 
     def list(self, thread_id: str) -> List[CheckpointKey]:
         keys = [key for key in self._store if key[0] == thread_id]
+        keys.sort(key=lambda k: k[2])  # sort by step number
         logger.debug(
             "Checkpoint.list: thread=%r -> %d checkpoint(s)", thread_id, len(keys)
         )

@@ -109,7 +109,7 @@ class SyncExecutor:
             # Fan-out check: execute all branches in parallel
             if node_name in graph._fanout_map:
                 logger.info("Fan-out node %r (%d branches)", node_name, len(graph._fanout_map[node_name].targets))
-                state = self._execute_fanout(graph, state, node_name, config)
+                state = self._execute_fanout(graph, state, node_name, config, step=step)
                 fanout_edge = graph._fanout_map[node_name]
                 node_name = fanout_edge.join or "__end__"
                 step += 1
@@ -189,7 +189,7 @@ class SyncExecutor:
 
             if node_name in graph._fanout_map:
                 logger.info("Stream fan-out: %r -> %d branches", node_name, len(graph._fanout_map[node_name].targets))
-                state = self._execute_fanout(graph, state, node_name, config)
+                state = self._execute_fanout(graph, state, node_name, config, step=step)
                 fanout_edge = graph._fanout_map[node_name]
                 node_name = fanout_edge.join or "__end__"
                 step += 1
@@ -201,6 +201,21 @@ class SyncExecutor:
             )
             try:
                 updates = node.invoke(state)
+            except GraphExecutionPaused as pause:
+                logger.info("Stream: Node %r paused execution: %s", node_name, pause.message)
+                yield StreamEvent(
+                    EventType.NODE_ERROR,
+                    node=node_name,
+                    data={"error": str(pause)},
+                    step=step,
+                )
+                if checkpointer is not None:
+                    key = (thread_id, node_name, step)
+                    checkpointer.put(key, _dump(state), parent_key=parent_key,
+                                     metadata={"_resume_node": node_name})
+                node_name = END_SENTINEL
+                yield StreamEvent(EventType.GRAPH_END, data={"state": _dump(state)})
+                return
             except Exception as exc:
                 logger.exception("Stream: Node %r failed at step %d", node_name, step)
                 yield StreamEvent(
@@ -249,6 +264,7 @@ class SyncExecutor:
         state: StateT,
         fanout_node: NodeName,
         config: Optional[Dict[str, Any]] = None,
+        step: int = 0,
     ) -> StateT:
         """Execute all branches from a fan-out node sequentially."""
         fanout_edge = graph._fanout_map[fanout_node]
@@ -263,8 +279,10 @@ class SyncExecutor:
                 if fanout_edge.join and current == fanout_edge.join:
                     break
                 node = graph.get_node(current)
+                step += 1
+                logger.debug("Fan-out branch step %d: node %r", step, current)
                 updates = node.invoke(branch_state)
-                branch_state = branch_state.apply(**updates)
+                branch_state = _apply(branch_state, updates)
                 current = self._resolve_next(graph, current, branch_state)
             results.append(branch_state)
 
@@ -449,7 +467,7 @@ class AsyncExecutor:
 
             if node_name in graph._fanout_map:
                 logger.info("Async fan-out node %r (%d branches)", node_name, len(graph._fanout_map[node_name].targets))
-                state = self._execute_fanout(graph, state, node_name, config)
+                state = await self._execute_fanout(graph, state, node_name, config, step=step)
                 fanout_edge = graph._fanout_map[node_name]
                 node_name = fanout_edge.join or "__end__"
                 step += 1
@@ -572,14 +590,15 @@ class AsyncExecutor:
 
         yield StreamEvent(EventType.GRAPH_END, data={"state": _dump(state)})
 
-    def _execute_fanout(
+    async def _execute_fanout(
         self,
         graph: CompiledGraph[StateT],
         state: StateT,
         fanout_node: NodeName,
         config: Optional[Dict[str, Any]] = None,
+        step: int = 0,
     ) -> StateT:
-        """Execute all branches from a fan-out node sequentially."""
+        """Execute all branches from a fan-out node asynchronously."""
         fanout_edge = graph._fanout_map[fanout_node]
         logger.info("Fan-out %r -> %d branches", fanout_node, len(fanout_edge.targets))
 
@@ -592,8 +611,13 @@ class AsyncExecutor:
                 if fanout_edge.join and current == fanout_edge.join:
                     break
                 node = graph.get_node(current)
-                updates = node.invoke(branch_state)
-                branch_state = branch_state.apply(**updates)
+                step += 1
+                logger.debug("Fan-out branch step %d: node %r", step, current)
+                if node.kind == NodeKind.ASYNC:
+                    updates = await node.ainvoke(branch_state)
+                else:
+                    updates = node.invoke(branch_state)
+                branch_state = _apply(branch_state, updates)
                 current = self._resolve_next(graph, current, branch_state)
             results.append(branch_state)
 

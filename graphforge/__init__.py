@@ -28,6 +28,7 @@ from graphforge._checkpoint import (
 from graphforge._checkpoint_sqlite import SqliteCheckpointer
 from graphforge._checkpoint_redis import RedisCheckpointer
 from graphforge._callbacks import Callback, CallbackManager
+from graphforge._edge import FanOutEdge
 from graphforge._executor import GraphExecutionPaused
 from graphforge._visualize import export_dot, render_graph
 from graphforge._logging import configure_logging, get_logger
@@ -61,8 +62,9 @@ __all__ = [
     # Callbacks
     "Callback",
     "CallbackManager",
-    # Logging
+    # Edge
     "FanOutEdge",
+    # Logging
     "GraphExecutionPaused",
     "configure_logging",
     "get_logger",
@@ -88,7 +90,7 @@ __author__ = "GraphForge Contributors"
 __license__ = "Apache 2.0"
 __description__ = __doc__.splitlines()[0].lstrip()
 __all__.sort()
-__all__.extend(["__version__", "__version_info__", "FanOutEdge",
+__all__.extend(["__version__", "__version_info__",
     "GraphExecutionPaused", "SqliteCheckpointer"])
 
 _logger.debug("GraphForge %s loaded", __version__)
