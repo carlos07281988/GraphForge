@@ -59,6 +59,10 @@ print(result.messages)  # ["processed"]
 
 ---
 
+**其他语言**：[English](README.md) | [简体中文](README.zh-CN.md)
+
+---
+
 ## Table of Contents
 
 - [Why GraphForge?](#why-graphforge)
@@ -520,7 +524,7 @@ NodeName, StateUpdate, ConfigDict
 
 For a deep dive into the design, see:
 
-[`docs/architecture.md`](docs/architecture.md)
+[`docs/architecture.md`](docs/architecture.md) · [`docs/architecture.zh-CN.md`](docs/architecture.zh-CN.md)（中文版）
 
 Topics covered:
 
