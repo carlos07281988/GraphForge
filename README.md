@@ -573,7 +573,7 @@ execution, streaming, checkpointing, callbacks, and pipelines.
 
 - [x] `resume()` API for long-running agents — checkpoint-based resumption with pause/retry support
 - [x] SQLite checkpointer — persistent state storage with full CRUD, metadata, and thread safety
-- [ ] Parallel / fan-out node execution
+- [x] Parallel / fan-out node execution — add_fanout() API, async parallel via asyncio.gather, sync sequential, join support
 - [ ] Graph visualisation (graphviz / networkx export)
 - [ ] Subgraph checkpoint isolation
 - [ ] Redis checkpointer

@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from graphforge._callbacks import CallbackManager
 from graphforge._checkpoint import Checkpointer, InMemoryCheckpointer
-from graphforge._edge import ConditionalEdge
+from graphforge._edge import ConditionalEdge, FanOutEdge
 from graphforge._graph import CompiledGraph
 from graphforge._logging import get_logger
 from graphforge._node import Node, NodeKind
@@ -106,6 +106,16 @@ class SyncExecutor:
                 break
             node = graph.get_node(node_name)
 
+            # Fan-out check: execute all branches in parallel
+            if node_name in graph._fanout_map:
+                logger.info("Fan-out node %r (%d branches)", node_name, len(graph._fanout_map[node_name].targets))
+                state = self._execute_fanout(graph, state, node_name, config)
+                fanout_edge = graph._fanout_map[node_name]
+                node_name = fanout_edge.join or "__end__"
+                step += 1
+                logger.debug("Fan-out step %d: next -> %r", step, node_name)
+                continue
+
             logger.info("Node %r (step=%d, kind=%s)", node_name, step, node.kind.value)
             logger.debug("State before %r: %s", node_name, _dump(state))
             self._callbacks.on_node_start(node_name, _dump(state))
@@ -177,6 +187,14 @@ class SyncExecutor:
 
             node = graph.get_node(node_name)
 
+            if node_name in graph._fanout_map:
+                logger.info("Stream fan-out: %r -> %d branches", node_name, len(graph._fanout_map[node_name].targets))
+                state = self._execute_fanout(graph, state, node_name, config)
+                fanout_edge = graph._fanout_map[node_name]
+                node_name = fanout_edge.join or "__end__"
+                step += 1
+                continue
+
             logger.debug("Stream emitting NODE_START for %r (step=%d)", node_name, step)
             yield StreamEvent(
                 EventType.NODE_START, node=node_name, data=_dump(state), step=step
@@ -224,6 +242,35 @@ class SyncExecutor:
 
         logger.info("Graph %r streaming finished", graph.name)
         yield StreamEvent(EventType.GRAPH_END, data={"state": _dump(state)})
+
+    def _execute_fanout(
+        self,
+        graph: CompiledGraph[StateT],
+        state: StateT,
+        fanout_node: NodeName,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> StateT:
+        """Execute all branches from a fan-out node sequentially."""
+        fanout_edge = graph._fanout_map[fanout_node]
+        logger.info("Fan-out %r -> %d branches", fanout_node, len(fanout_edge.targets))
+
+        results: List[StateT] = []
+        for target in fanout_edge.targets:
+            logger.debug("Fan-out branch: %r", target)
+            branch_state = state
+            current: Optional[NodeName] = target
+            while current is not None and current != "__end__":
+                if fanout_edge.join and current == fanout_edge.join:
+                    break
+                node = graph.get_node(current)
+                updates = node.invoke(branch_state)
+                branch_state = branch_state.apply(**updates)
+                current = self._resolve_next(graph, current, branch_state)
+            results.append(branch_state)
+
+        merged = _merge_parallel_results(state, results)
+        logger.info("Fan-out %r done, %d branches merged", fanout_node, len(results))
+        return merged
 
     def _resolve_next(
         self,
@@ -400,6 +447,14 @@ class AsyncExecutor:
 
             node = graph.get_node(node_name)
 
+            if node_name in graph._fanout_map:
+                logger.info("Async fan-out node %r (%d branches)", node_name, len(graph._fanout_map[node_name].targets))
+                state = self._execute_fanout(graph, state, node_name, config)
+                fanout_edge = graph._fanout_map[node_name]
+                node_name = fanout_edge.join or "__end__"
+                step += 1
+                continue
+
             logger.info("Async node %r (step=%d)", node_name, step)
             self._callbacks.on_node_start(node_name, _dump(state))
             try:
@@ -517,6 +572,35 @@ class AsyncExecutor:
 
         yield StreamEvent(EventType.GRAPH_END, data={"state": _dump(state)})
 
+    def _execute_fanout(
+        self,
+        graph: CompiledGraph[StateT],
+        state: StateT,
+        fanout_node: NodeName,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> StateT:
+        """Execute all branches from a fan-out node sequentially."""
+        fanout_edge = graph._fanout_map[fanout_node]
+        logger.info("Fan-out %r -> %d branches", fanout_node, len(fanout_edge.targets))
+
+        results: List[StateT] = []
+        for target in fanout_edge.targets:
+            logger.debug("Fan-out branch: %r", target)
+            branch_state = state
+            current: Optional[NodeName] = target
+            while current is not None and current != "__end__":
+                if fanout_edge.join and current == fanout_edge.join:
+                    break
+                node = graph.get_node(current)
+                updates = node.invoke(branch_state)
+                branch_state = branch_state.apply(**updates)
+                current = self._resolve_next(graph, current, branch_state)
+            results.append(branch_state)
+
+        merged = _merge_parallel_results(state, results)
+        logger.info("Fan-out %r done, %d branches merged", fanout_node, len(results))
+        return merged
+
     def _resolve_next(
         self,
         graph: CompiledGraph[StateT],
@@ -629,6 +713,29 @@ def _dump(state: Any) -> Dict[str, Any]:
     if isinstance(state, dict):
         return state
     return dict(state)
+
+
+def _merge_parallel_results(state: Any, results: List) -> Any:
+    """Merge states from multiple parallel branches into one."""
+    merged = state
+    for branch_result in results:
+        if hasattr(branch_result, 'model_dump') and hasattr(state, 'model_dump'):
+            updates: Dict[str, Any] = {}
+            for key in state.model_dump():
+                old_val = getattr(state, key, None)
+                new_val = getattr(branch_result, key, None)
+                if old_val != new_val:
+                    updates[key] = new_val
+            if updates:
+                merged = merged.apply(**updates)
+        else:
+            branch_dict = branch_result.model_dump() if hasattr(branch_result, 'model_dump') else dict(branch_result)
+            if hasattr(merged, 'apply'):
+                merged = merged.apply(**branch_dict)
+            else:
+                for k, v in branch_dict.items():
+                    merged[k] = v
+    return merged
 
 
 def _apply(state: Any, updates: StateUpdate) -> Any:

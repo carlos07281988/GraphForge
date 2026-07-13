@@ -112,11 +112,37 @@ class ConditionalEdge(Generic[StateT]):
 # Union type for edges stored in a graph
 # ---------------------------------------------------------------------------
 
-AnyEdge = Union[DirectEdge[StateT], ConditionalEdge[StateT]]
+
+class FanOutEdge(Generic[StateT]):
+    """A fan-out edge that spawns multiple parallel branches."""
+
+    __slots__ = ("source", "targets", "join")
+
+    def __init__(
+        self,
+        source: NodeName,
+        targets: List[NodeName],
+        join: Optional[NodeName] = None,
+    ) -> None:
+        assert source, "source must be a non-empty string"
+        assert targets, "targets must be a non-empty list"
+        self.source = source
+        self.targets = list(targets)
+        self.join = join
+
+    def __repr__(self) -> str:
+        return (
+            f"FanOutEdge({self.source!r} -> "
+            f"{self.targets!r}{'' if self.join is None else f' join={self.join!r}'})"
+        )
+
+
+AnyEdge = Union[DirectEdge[StateT], ConditionalEdge[StateT], FanOutEdge[StateT]]
 
 
 __all__ = [
     "ConditionalEdge",
     "DirectEdge",
     "EdgeKind",
+    "FanOutEdge",
 ]
