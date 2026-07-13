@@ -54,6 +54,8 @@ class Checkpointer(abc.ABC, Generic[StateT]):
         key: CheckpointKey,
         state: Dict[str, Any],
         parent_key: Optional[CheckpointKey] = None,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Store a checkpoint."""
         ...
@@ -89,13 +91,15 @@ class InMemoryCheckpointer(Checkpointer[StateT]):
         key: CheckpointKey,
         state: Dict[str, Any],
         parent_key: Optional[CheckpointKey] = None,
+        *,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         logger.debug(
             "Checkpoint.put: thread=%r node=%r step=%d",
             key[0], key[1], key[2],
         )
         self._store[key] = Checkpoint(
-            key=key, state=state, parent_key=parent_key
+            key=key, state=state, parent_key=parent_key, metadata=metadata
         )
 
     def get(self, key: CheckpointKey) -> Optional[Checkpoint[StateT]]:

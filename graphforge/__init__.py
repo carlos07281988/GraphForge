@@ -25,7 +25,9 @@ from graphforge._checkpoint import (
     CheckpointKey,
     InMemoryCheckpointer,
 )
+from graphforge._checkpoint_sqlite import SqliteCheckpointer
 from graphforge._callbacks import Callback, CallbackManager
+from graphforge._executor import GraphExecutionPaused
 from graphforge._logging import configure_logging, get_logger
 from graphforge.pipeline import Pipeline
 from graphforge.state import Append, GraphState, MergeStrategy, node_field
@@ -52,10 +54,12 @@ __all__ = [
     "Checkpointer",
     "CheckpointKey",
     "InMemoryCheckpointer",
+    "SqliteCheckpointer",
     # Callbacks
     "Callback",
     "CallbackManager",
     # Logging
+    "GraphExecutionPaused",
     "configure_logging",
     "get_logger",
     # Protocol aliases
@@ -80,6 +84,6 @@ __author__ = "GraphForge Contributors"
 __license__ = "Apache 2.0"
 __description__ = __doc__.splitlines()[0].lstrip()
 __all__.sort()
-__all__.extend(["__version__", "__version_info__"])
+__all__.extend(["__version__", "__version_info__", "GraphExecutionPaused", "SqliteCheckpointer"])
 
 _logger.debug("GraphForge %s loaded", __version__)

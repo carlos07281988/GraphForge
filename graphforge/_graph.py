@@ -148,6 +148,7 @@ class Graph(Generic[StateT]):
         *,
         checkpointer: Optional["Checkpointer"] = None,
         name: Optional[str] = None,
+        state_type: Optional[type] = None,
     ) -> "CompiledGraph[StateT]":
         logger.info(
             "Compiling graph: %d nodes, %d edges, %d conditional edges",
@@ -163,6 +164,7 @@ class Graph(Generic[StateT]):
             checkpointer=checkpointer,
             name=name or "unnamed",
             metadata=dict(self._metadata),
+            state_type=state_type,
         )
 
     def _validate(self) -> None:
@@ -210,6 +212,7 @@ class CompiledGraph(Generic[StateT]):
         "_nodes", "_direct_edges", "_conditional_edges",
         "_entry_point", "_finish_points", "_checkpointer",
         "_name", "_metadata",
+        "_state_type",
         "_successors", "_conditionals",
     )
 
@@ -224,6 +227,7 @@ class CompiledGraph(Generic[StateT]):
         checkpointer: Optional["Checkpointer"] = None,
         name: str = "unnamed",
         metadata: Optional[Dict[str, Any]] = None,
+        state_type: Optional[type] = None,
     ) -> None:
         self._nodes = nodes
         self._direct_edges = direct_edges
@@ -233,6 +237,7 @@ class CompiledGraph(Generic[StateT]):
         self._checkpointer = checkpointer
         self._name = name
         self._metadata = metadata or {}
+        self._state_type = state_type
 
         self._successors: Dict[NodeName, List[Optional[NodeName]]] = {}
         self._conditionals: Dict[NodeName, ConditionalEdge] = {}
@@ -275,6 +280,11 @@ class CompiledGraph(Generic[StateT]):
     @property
     def checkpointer(self) -> Optional["Checkpointer"]:
         return self._checkpointer
+
+    @property
+    def state_type(self) -> Optional[type]:
+        """The state class used for checkpoint deserialization."""
+        return self._state_type
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -336,6 +346,77 @@ class CompiledGraph(Generic[StateT]):
         executor = AsyncExecutor(callbacks=callbacks)
         async for event in executor.stream(self, input_state, config=config):
             yield event
+
+    def resume(
+        self,
+        thread_id: str,
+        *,
+        state_type: Optional[type] = None,
+        updates: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
+        callbacks: Optional["CallbackManager"] = None,
+    ) -> StateT:
+        """Resume execution from the last checkpoint.
+
+        Uses the graph's checkpointer to load the last saved state and
+        continues execution from where it left off.
+
+        Parameters
+        ----------
+        thread_id:
+            Thread identifier used when creating checkpoints.
+        state_type:
+            State class for deserialization. Falls back to the compiled
+            graph's stored ``state_type``.
+        updates:
+            Optional state updates to apply before resuming (e.g., human
+            input injected into a paused agent).
+        config:
+            Optional runtime configuration.
+        callbacks:
+            Optional callback manager for lifecycle hooks.
+
+        Returns
+        -------
+        The final state after execution completes.
+        """
+        from graphforge._executor import SyncExecutor
+
+        st = state_type or self._state_type
+        if st is None:
+            raise ValueError(
+                "No state_type provided. Either set it in compile() "
+                "or pass it to resume()."
+            )
+        executor = SyncExecutor(callbacks=callbacks)
+        return executor.resume(
+            self, thread_id, st,
+            updates=updates, config=config,
+        )
+
+    async def aresume(
+        self,
+        thread_id: str,
+        *,
+        state_type: Optional[type] = None,
+        updates: Optional[Dict[str, Any]] = None,
+        config: Optional[Dict[str, Any]] = None,
+        callbacks: Optional["CallbackManager"] = None,
+    ) -> StateT:
+        """Resume execution from the last checkpoint (async)."""
+        from graphforge._executor import AsyncExecutor
+
+        st = state_type or self._state_type
+        if st is None:
+            raise ValueError(
+                "No state_type provided. Either set it in compile() "
+                "or pass it to resume()."
+            )
+        executor = AsyncExecutor(callbacks=callbacks)
+        return await executor.resume(
+            self, thread_id, st,
+            updates=updates, config=config,
+        )
 
     def __repr__(self) -> str:
         return (

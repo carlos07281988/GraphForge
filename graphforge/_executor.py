@@ -33,6 +33,22 @@ logger = get_logger("executor")
 
 DEFAULT_RECURSION_LIMIT = 100
 END_SENTINEL = "__end__"
+class GraphExecutionPaused(Exception):
+    """Raised by a node to pause execution (e.g., waiting for human input).
+
+    When the executor catches this exception, it saves a checkpoint and
+    returns the current state instead of propagating the error.
+    """
+
+    def __init__(
+        self,
+        message: str = "Execution paused",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.message = message
+        self.metadata = metadata or {}
+        super().__init__(message)
+
 
 
 # ===================================================================
@@ -56,6 +72,8 @@ class SyncExecutor:
         graph: CompiledGraph[StateT],
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
+        *,
+        start_node: Optional[NodeName] = None,
     ) -> StateT:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -63,7 +81,7 @@ class SyncExecutor:
         checkpointer = graph.checkpointer or InMemoryCheckpointer()
 
         state = input_state
-        node_name: Optional[NodeName] = graph.entry_point
+        node_name: Optional[NodeName] = start_node or graph.entry_point
         parent_key = None
         step = 0
 
@@ -93,6 +111,15 @@ class SyncExecutor:
             self._callbacks.on_node_start(node_name, _dump(state))
             try:
                 updates = node.invoke(state)
+            except GraphExecutionPaused as pause:
+                logger.info("Node %r paused execution: %s", node_name, pause.message)
+                self._callbacks.on_node_error(node_name, pause)
+                if checkpointer is not None:
+                    key = (thread_id, node_name, step)
+                    checkpointer.put(key, _dump(state), parent_key=parent_key,
+                                     metadata={"_resume_node": node_name})
+                self._callbacks.on_graph_end(graph.name, _dump(state))
+                return state
             except Exception as exc:
                 logger.exception("Node %r failed at step %d", node_name, step)
                 self._callbacks.on_node_error(node_name, exc)
@@ -124,6 +151,8 @@ class SyncExecutor:
         graph: CompiledGraph[StateT],
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
+        *,
+        start_node: Optional[NodeName] = None,
     ) -> Generator[StreamEvent, None, None]:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -131,7 +160,7 @@ class SyncExecutor:
         checkpointer = graph.checkpointer or InMemoryCheckpointer()
 
         state = input_state
-        node_name: Optional[NodeName] = graph.entry_point
+        node_name: Optional[NodeName] = start_node or graph.entry_point
         parent_key = None
         step = 0
 
@@ -235,6 +264,98 @@ class SyncExecutor:
 # ===================================================================
 
 
+    def resume(
+        self,
+        graph: CompiledGraph[StateT],
+        thread_id: str,
+        state_type: Any,
+        *,
+        updates: Optional[StateUpdate] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> StateT:
+        """Resume execution from the last checkpoint.
+
+        Parameters
+        ----------
+        graph:
+            The compiled graph to resume.
+        thread_id:
+            Thread identifier used when creating checkpoints.
+        state_type:
+            The state class to reconstruct state from checkpoint dict.
+        updates:
+            Optional state updates to apply before resuming.
+        config:
+            Optional runtime configuration.
+
+        Returns
+        -------
+        The final state after execution completes.
+        """
+        checkpointer = graph.checkpointer or InMemoryCheckpointer()
+        keys = checkpointer.list(thread_id)
+        if not keys:
+            raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+
+        last_key = keys[-1]
+        checkpoint = checkpointer.get(last_key)
+        if checkpoint is None:
+            raise ValueError(f"Checkpoint {last_key} not found.")
+
+        # Reconstruct state from checkpoint dict
+        if hasattr(state_type, "model_validate"):
+            state = state_type.model_validate(checkpoint.state)
+        elif isinstance(state_type, type):
+            state = state_type(**checkpoint.state)
+        else:
+            raise TypeError(
+                f"Cannot reconstruct state from type {state_type}. "
+                f"Provide a Pydantic model class or a callable."
+            )
+
+        if updates:
+            if hasattr(state, "apply"):
+                state = state.apply(**updates)
+            else:
+                for k, v in updates.items():
+                    setattr(state, k, v)
+
+        # Determine next node after the last checkpointed node
+        # If paused, resume from the pause node (re-run it)
+        resume_node = checkpoint.metadata.get("_resume_node")
+        if resume_node:
+            logger.info(
+                "Resuming graph %r from paused node %r (step=%d)",
+                graph.name, resume_node, last_key[2],
+            )
+            return self.execute(
+                graph, state,
+                start_node=resume_node,
+                config={**(config or {}), "thread_id": thread_id},
+            )
+
+        last_node: NodeName = last_key[1]
+        next_node = self._resolve_next(graph, last_node, state)
+
+        # If already at terminal, return state unchanged
+        if next_node is None or next_node == END_SENTINEL:
+            logger.info(
+                "Graph %r already at terminal after node %r (step=%d)",
+                graph.name, last_node, last_key[2],
+            )
+            return state
+
+        logger.info(
+            "Resuming graph %r from node %r (step=%d)",
+            graph.name, next_node, last_key[2],
+        )
+        return self.execute(
+            graph, state,
+            start_node=next_node,
+            config={**(config or {}), "thread_id": thread_id},
+        )
+
+
 class AsyncExecutor:
     """Asynchronous graph executor."""
 
@@ -251,6 +372,8 @@ class AsyncExecutor:
         graph: CompiledGraph[StateT],
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
+        *,
+        start_node: Optional[NodeName] = None,
     ) -> StateT:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -258,7 +381,7 @@ class AsyncExecutor:
         checkpointer = graph.checkpointer or InMemoryCheckpointer()
 
         state = input_state
-        node_name: Optional[NodeName] = graph.entry_point
+        node_name: Optional[NodeName] = start_node or graph.entry_point
         parent_key = None
         step = 0
 
@@ -284,6 +407,15 @@ class AsyncExecutor:
                     updates = await node.ainvoke(state)
                 else:
                     updates = node.invoke(state)
+            except GraphExecutionPaused as pause:
+                logger.info("Async node %r paused: %s", node_name, pause.message)
+                self._callbacks.on_node_error(node_name, pause)
+                if checkpointer is not None:
+                    key = (thread_id, node_name, step)
+                    checkpointer.put(key, _dump(state), parent_key=parent_key,
+                                     metadata={"_resume_node": node_name})
+                self._callbacks.on_graph_end(graph.name, _dump(state))
+                return state
             except Exception as exc:
                 logger.exception("Async node %r failed", node_name)
                 self._callbacks.on_node_error(node_name, exc)
@@ -414,6 +546,75 @@ class AsyncExecutor:
         raise RuntimeError(
             f"Node {current!r} has {len(successors)} direct successors "
             f"but no conditional edge."
+        )
+
+
+    async def resume(
+        self,
+        graph: CompiledGraph[StateT],
+        thread_id: str,
+        state_type: Any,
+        *,
+        updates: Optional[StateUpdate] = None,
+        config: Optional[Dict[str, Any]] = None,
+    ) -> StateT:
+        """Resume execution from the last checkpoint (async)."""
+        checkpointer = graph.checkpointer or InMemoryCheckpointer()
+        keys = checkpointer.list(thread_id)
+        if not keys:
+            raise ValueError(f"No checkpoint found for thread {thread_id!r}")
+
+        last_key = keys[-1]
+        checkpoint = checkpointer.get(last_key)
+        if checkpoint is None:
+            raise ValueError(f"Checkpoint {last_key} not found.")
+
+        if hasattr(state_type, "model_validate"):
+            state = state_type.model_validate(checkpoint.state)
+        elif isinstance(state_type, type):
+            state = state_type(**checkpoint.state)
+        else:
+            raise TypeError(
+                f"Cannot reconstruct state from type {state_type}."
+            )
+
+        if updates:
+            if hasattr(state, "apply"):
+                state = state.apply(**updates)
+            else:
+                for k, v in updates.items():
+                    setattr(state, k, v)
+
+        resume_node = checkpoint.metadata.get("_resume_node")
+        if resume_node:
+            logger.info(
+                "Resuming graph %r from paused node %r (step=%d)",
+                graph.name, resume_node, last_key[2],
+            )
+            return await self.execute(
+                graph, state,
+                start_node=resume_node,
+                config={**(config or {}), "thread_id": thread_id},
+            )
+
+        last_node: NodeName = last_key[1]
+        next_node = self._resolve_next(graph, last_node, state)
+
+        if next_node is None or next_node == END_SENTINEL:
+            logger.info(
+                "Graph %r already at terminal after node %r (step=%d)",
+                graph.name, last_node, last_key[2],
+            )
+            return state
+
+        logger.info(
+            "Async resume graph %r from node %r (step=%d)",
+            graph.name, next_node, last_key[2],
+        )
+        return await self.execute(
+            graph, state,
+            start_node=next_node,
+            config={**(config or {}), "thread_id": thread_id},
         )
 
 

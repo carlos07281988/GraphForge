@@ -454,7 +454,7 @@ compiled.invoke(state, callbacks=manager)
 | `set_entry_point(name)` | `Self` | Define start node |
 | `set_finish_point(name)` | `Self` | Define terminal node |
 | `set_metadata(key, value)` | `Self` | Attach metadata |
-| `compile(checkpointer=None, name=None)` | `CompiledGraph` | Freeze and validate |
+| `compile(checkpointer=None, name=None, state_type=None)` | `CompiledGraph` | Freeze and validate |
 
 ### `CompiledGraph[StateT]`
 
@@ -464,7 +464,9 @@ compiled.invoke(state, callbacks=manager)
 | `ainvoke(state, config=None, callbacks=None)` | `StateT` | Async execution |
 | `stream(state, config=None, callbacks=None)` | `Generator[StreamEvent]` | Sync streaming |
 | `astream(state, config=None, callbacks=None)` | `AsyncGenerator[StreamEvent]` | Async streaming |
-| Properties: `name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata` |  | Read-only |
+| `resume(thread_id, state_type=None, updates=None, config=None, callbacks=None)` | `StateT` | Resume from last checkpoint |
+| `aresume(thread_id, state_type=None, updates=None, config=None, callbacks=None)` | `StateT` | Async resume |
+| Properties: `name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata`, `state_type` |  | Read-only |
 
 ### `GraphState`
 
@@ -503,6 +505,8 @@ GraphState, Append, MergeStrategy, node_field,
 Pipeline,
 EventType, StreamEvent,
 Checkpoint, Checkpointer, CheckpointKey, InMemoryCheckpointer,
+SqliteCheckpointer,
+GraphExecutionPaused,
 Callback, CallbackManager,
 configure_logging, get_logger,
 NodeFunc, AsyncNodeFunc, RouterFunc, AsyncRouterFunc,
@@ -567,11 +571,12 @@ execution, streaming, checkpointing, callbacks, and pipelines.
 
 ### Roadmap
 
+- [x] `resume()` API for long-running agents — checkpoint-based resumption with pause/retry support
+- [x] SQLite checkpointer — persistent state storage with full CRUD, metadata, and thread safety
 - [ ] Parallel / fan-out node execution
 - [ ] Graph visualisation (graphviz / networkx export)
-- [ ] SQLite / Redis checkpointers
 - [ ] Subgraph checkpoint isolation
-- [ ] `resume()` API for long-running agents
+- [ ] Redis checkpointer
 - [ ] Pydantic v1 compatibility
 
 ---
