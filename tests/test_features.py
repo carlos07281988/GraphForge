@@ -580,3 +580,155 @@ class TestCommandAPI:
         result = g.invoke(CmdState(x=0))
         assert result.path == "reached"
         assert result.x == 99
+
+
+# =====================================================================
+# Feature 6: Interrupt / Resume
+# =====================================================================
+
+
+class IntState(GraphState):
+    x: int = 0
+    step: str = ""
+
+
+class TestInterruptResume:
+    def test_interrupt_pauses_then_resume(self) -> None:
+        from graphforge import interrupt, InMemoryCheckpointer
+
+        counter: List[int] = [0]
+
+        def node_with_interrupt(state: IntState) -> dict:
+            counter[0] += 1
+            if counter[0] == 1:
+                interrupt(message="Need human input")
+            return {"x": state.x + 1, "step": "done"}
+
+        graph = (
+            Graph[IntState]()
+            .add_node("a", node_with_interrupt)
+            .add_edge("a", "__end__")
+            .set_entry_point("a")
+            .compile(checkpointer=InMemoryCheckpointer(), state_type=IntState)
+        )
+
+        # First call pauses
+        state1 = graph.invoke(IntState(x=0), config={"thread_id": "int1"})
+        assert state1.x == 0
+        assert state1.step == ""
+        assert counter[0] == 1
+
+        # Resume with updates
+        result = graph.resume("int1", updates={"x": 10})
+        assert result.x == 11  # 10 + 1
+        assert result.step == "done"
+        assert counter[0] == 2
+
+    def test_resume_without_updates(self) -> None:
+        from graphforge import interrupt, InMemoryCheckpointer
+
+        counter: List[int] = [0]
+
+        def node(state: IntState) -> dict:
+            counter[0] += 1
+            if counter[0] == 1:
+                interrupt()
+            return {"step": "done"}
+
+        cp = InMemoryCheckpointer()
+        g = Graph[IntState]().add_node("a", node).add_edge("a", "__end__").set_entry_point("a").compile(checkpointer=cp, state_type=IntState)
+        g.invoke(IntState(x=0), config={"thread_id": "int2"})
+        result = g.resume("int2")
+        assert result.step == "done"
+
+    def test_interrupt_is_reentrant(self) -> None:
+        from graphforge import interrupt, InMemoryCheckpointer
+
+        call = [0]
+        def multi_pause(state: IntState) -> dict:
+            call[0] += 1
+            if call[0] <= 2:
+                interrupt(message=f"Pause #{call[0]}")
+            return {"x": state.x + 1, "step": f"done-{call[0]}"}
+
+        cp = InMemoryCheckpointer()
+        g = Graph[IntState]().add_node("a", multi_pause).add_edge("a", "__end__").set_entry_point("a").compile(checkpointer=cp, state_type=IntState)
+        g.invoke(IntState(x=0), config={"thread_id": "int3"})
+        g.resume("int3", updates={"x": 1})  # resumes, pauses again
+        result = g.resume("int3", updates={"x": 5})
+        assert result.x == 6  # 5 + 1
+        assert result.step == "done-3"
+
+
+# =====================================================================
+# Feature 7: Mermaid Diagram Export
+# =====================================================================
+
+
+class MerState(GraphState):
+    x: int = 0
+
+
+class TestMermaidExport:
+    def test_export_simple(self) -> None:
+        from graphforge import export_mermaid
+
+        g = Graph[MerState]().add_node("a", lambda s: {"x": 1}).add_edge("a", "__end__").set_entry_point("a").compile()
+        m = export_mermaid(g)
+        assert "graph LR" in m
+        assert "a" in m
+        assert "__start__" in m
+        assert "__end__" in m
+
+    def test_export_conditional(self) -> None:
+        from graphforge import export_mermaid
+
+        def router(state: MerState) -> str:
+            return "b" if state.x > 0 else "c"
+
+        g = (
+            Graph[MerState]()
+            .add_node("a", lambda s: s)
+            .add_node("b", lambda s: s)
+            .add_node("c", lambda s: s)
+            .add_conditional_edges("a", router, {"b": "b", "c": "c"})
+            .add_edge("b", "__end__")
+            .add_edge("c", "__end__")
+            .set_entry_point("a")
+            .compile()
+        )
+        m = export_mermaid(g)
+        assert "b" in m
+        assert "c" in m
+        assert "0|" in m or "|" in m  # edge labels
+
+    def test_export_error_edge(self) -> None:
+        from graphforge import export_mermaid, ErrorEdge
+
+        g = (
+            Graph[MerState]()
+            .add_node("p", lambda s: {"x": 1})
+            .add_node("f", lambda s: {"x": -1})
+            .add_error_edge("p", "f")
+            .add_edge("f", "__end__")
+            .add_edge("p", "__end__")
+            .set_entry_point("p")
+            .compile()
+        )
+        m = export_mermaid(g)
+        assert "error" in m or "f" in m
+
+    def test_export_with_kind_label(self) -> None:
+        from graphforge import export_mermaid
+
+        sub = Graph[MerState]().add_node("inner", lambda s: {"x": s.x + 1}).add_edge("inner", "__end__").set_entry_point("inner").compile()
+        g = Graph[MerState]().add_node("sub_node", sub).add_edge("sub_node", "__end__").set_entry_point("sub_node").compile()
+        m = export_mermaid(g, show_kind=True)
+        assert "subgraph" in m or "sub_node" in m
+
+    def test_export_direction(self) -> None:
+        from graphforge import export_mermaid
+
+        g = Graph[MerState]().add_node("a", lambda s: {"x": 1}).add_edge("a", "__end__").set_entry_point("a").compile()
+        m = export_mermaid(g, direction="TB")
+        assert "graph TB" in m

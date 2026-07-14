@@ -28,6 +28,8 @@ from graphforge._checkpoint import (
 from graphforge._checkpoint_sqlite import SqliteCheckpointer
 from graphforge._checkpoint_redis import RedisCheckpointer
 from graphforge._command import Command
+from graphforge._interrupt import interrupt
+from graphforge._mermaid import export_mermaid
 from graphforge._callbacks import Callback, CallbackManager
 from graphforge._edge import ErrorEdge, FanOutEdge
 from graphforge._executor import GraphExecutionPaused
@@ -65,6 +67,8 @@ __all__ = [
     "CallbackManager",
     # Edge / Command
     "Command",
+    "interrupt",
+    "export_mermaid",
     "ErrorEdge",
     "FanOutEdge",
     # Visualise
