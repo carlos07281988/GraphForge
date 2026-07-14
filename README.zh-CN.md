@@ -678,15 +678,29 @@ render_graph(compiled, "graph.png")
 
 ---
 
+所有改进的详细记录请参阅 [`docs/improvements.md`](docs/improvements.md)。
+
 ## Roadmap
 
 - [x] `resume()` API — 基于检查点的恢复，支持暂停/重试
 - [x] SQLite 检查点 — 持久化状态存储，完整 CRUD，线程安全
 - [x] 并行/扇出节点执行 — `add_fanout()` API，异步并行，join 支持
+- [x] 子图检查点隔离 — 自动线程 ID 前缀，共享检查点支持
+- [x] 图可视化 — `export_dot()` DOT 导出，`render_graph()` 图片渲染
 - [x] Redis 检查点 — 分布式持久化
-- [x] 图可视化 — `export_dot()` / `render_graph()`
-- [ ] 子图检查点隔离
-- [ ] Pydantic v1 兼容
+- [x] Pydantic v1 兼容 — v1/v2 API 统一兼容层
+- [x] A2A（Agent-to-Agent）协议 — 出站/入站 agent 通信
+- [x] 节点级重试与错误回退 — retry=N, add_error_edge()
+- [x] 子图 I/O 映射 — input_map/output_map 父子边界声明
+- [x] 智能体模块 — ToolNode、has_tool_calls()、create_react_agent()
+
+### 未来工作
+
+- 图序列化（JSON/YAML 导入/导出）
+- A2A 推送通知（基于 Webhook 的任务更新）
+- OpenTelemetry 追踪（节点级可观测性）
+- 人机协同模式（审批节点、中断/恢复）
+- 分布式执行（Dask/Ray 集成）
 
 ---
 

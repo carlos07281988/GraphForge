@@ -835,15 +835,29 @@ mypy graphforge/
 The framework currently targets **70+ tests** across state management, graph building,
 execution, streaming, checkpointing, callbacks, and pipelines.
 
+A detailed record of all improvements is maintained in [](docs/improvements.md).
+
 ### Roadmap
 
 - [x] `resume()` API for long-running agents — checkpoint-based resumption with pause/retry support
 - [x] SQLite checkpointer — persistent state storage with full CRUD, metadata, and thread safety
 - [x] Parallel / fan-out node execution — add_fanout() API, async parallel via asyncio.gather, sync sequential, join support
 - [x] Subgraph checkpoint isolation — automatic thread_id prefix for nested graphs, shared checkpointer support
- - [x] Graph visualisation — export_dot() to DOT format, render_graph() to image
- - [x] Redis checkpointer — distributed state persistence via Redis
- - [x] Pydantic v1 compatibility — unified compat layer for v1/v2 APIs
+- [x] Graph visualisation — export_dot() to DOT format, render_graph() to image
+- [x] Redis checkpointer — distributed state persistence via Redis
+- [x] Pydantic v1 compatibility — unified compat layer for v1/v2 APIs
+- [x] A2A (Agent-to-Agent) protocol — outbound/inbound agent communication
+- [x] Node-level retry & error fallback — retry=N, add_error_edge()
+- [x] Subgraph I/O mapping — input_map/output_map for clean parent/child boundaries
+- [x] Agents module — ToolNode, has_tool_calls(), create_react_agent()
+
+### Future Work
+
+ - Graph serialisation (export/import graphs as JSON or YAML)
+ - A2A push notifications (webhook-based task updates)
+ - OpenTelemetry tracing for node-level observability
+ - Human-in-the-loop patterns (approval nodes, interrupt/resume)
+ - Distributed execution (Dask/Ray integration)
 
 ---
 
