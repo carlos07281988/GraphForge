@@ -74,7 +74,11 @@ print(result.messages)  # ["processed"]
   - [Graph & CompiledGraph](#graph--compiledgraph)
   - [Conditional Routing](#conditional-routing)
   - [Pipeline](#pipeline)
+  - [Node-level Retry & Error Fallback](#node-level-retry--error-fallback)
+  - [Subgraph I/O Mapping](#subgraph-io-mapping)
   - [A2A (Agent-to-Agent) Protocol](#a2a-agent-to-agent-protocol)
+  - [Agents (ToolNode + ReAct)](#agents-toolnode--react)
+  - [Agents (ToolNode + ReAct)](#agents-toolnode--react)
 - [Execution Modes](#execution-modes)
   - [Invoke](#invoke)
   - [Streaming](#streaming)
@@ -263,6 +267,80 @@ pipe = Pipeline[AgentState]([
 graph.add_node("preprocess", pipe)
 ```
 
+
+### Node-level Retry & Error Fallback
+
+Nodes can automatically retry on failure, and graphs can route to a fallback
+node when a node exhausts its retries.
+
+**Retry:** Pass ``retry=N`` to :meth:`~graphforge.Graph.add_node`:
+
+```python
+def flaky_node(state) -> dict:
+    # may raise occasionally
+    return {"x": 1}
+
+graph.add_node("unstable", flaky_node, retry=3)
+```
+
+The executor retries up to ``retry + 1`` times before propagating the
+exception.
+
+**Error edge:** Use :meth:`~graphforge.Graph.add_error_edge` to define a
+fallback path:
+
+```python
+def fallback(state) -> dict:
+    return {"x": -1}
+
+graph.add_node("primary", flaky_node)
+graph.add_node("backup", fallback)
+graph.add_error_edge("primary", "backup")
+graph.add_edge("backup", "__end__")
+graph.add_edge("primary", "__end__")
+```
+
+If ``primary`` raises an exception and all retries are exhausted, execution
+routes to ``backup`` instead of crashing.
+
+
+### Subgraph I/O Mapping
+
+When embedding a sub-graph as a node, you can declare how the parent state
+maps to and from the subgraph state with ``input_map`` and ``output_map``.
+
+```python
+class ParentState(GraphState):
+    query: str = ""
+    result: str = ""
+
+class SubState(GraphState):
+    prompt: str = ""
+    output: str = ""
+
+# Compile the subgraph with I/O maps
+sub = (
+    Graph[SubState]()
+    .add_node("process", lambda s: {"output": f"Result: {s.prompt}"})
+    .add_edge("process", "__end__")
+    .set_entry_point("process")
+    .compile(
+        state_type=SubState,
+        input_map={"query": "prompt"},    # parent.query -> sub.prompt
+        output_map={"output": "result"},  # sub.output -> parent.result
+    )
+)
+
+# Use the subgraph as a node in the parent graph
+parent = Graph[ParentState]().add_node("sub", sub).add_edge("sub", "__end__").set_entry_point("sub").compile()
+result = parent.invoke(ParentState(query="hello"))
+print(result.result)  # "Result: hello"
+```
+
+The ``input_map`` copies fields **from** parent state **to** subgraph state;
+the ``output_map`` copies fields **from** subgraph result **to** the parent
+state update. Both are optional.
+
 ### A2A (Agent-to-Agent) Protocol
 
 GraphForge includes built-in support for Google's [Agent-to-Agent (A2A)](https://google.github.io/A2A/) open protocol,
@@ -354,6 +432,69 @@ POST /tasks/{id}/cancel           # Cancel task
 
 
 ---
+
+### Agents (ToolNode + ReAct)
+
+GraphForge ships with built-in agent patterns and tool-calling support
+in the ``graphforge.agents`` module.
+
+**ToolNode** — a node that calls an LLM, executes tool calls, and appends
+results to the message list:
+
+```python
+from graphforge.agents import ToolNode
+
+def search(query: str) -> str:
+    return f"Found: {query}"
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Web search",
+            "parameters": {
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+                "required": ["query"],
+            },
+        },
+        "_func": search,
+    }
+]
+
+def llm(messages, tools):
+    return {
+        "content": None,
+        "tool_calls": [{"id": "c1", "name": "search", "arguments": {"query": "hello"}}],
+    }
+
+graph.add_node("agent", ToolNode(llm, tools=tools))
+```
+
+**Router** — :func:`~graphforge.agents.has_tool_calls` checks if the last
+message contains tool calls, for use with ``add_conditional_edges``:
+
+```python
+from graphforge.agents import has_tool_calls
+graph.add_conditional_edges("agent", has_tool_calls, {
+    "tools": "execute_tools",
+    "end": "__end__",
+})
+```
+
+**ReAct Agent** — :func:`~graphforge.agents.create_react_agent` builds a
+complete Reasoning + Acting loop graph in one call:
+
+```python
+from graphforge.agents import create_react_agent
+
+graph = create_react_agent(llm, tools=tools)
+compiled = graph.compile(state_type=ReactState)
+result = compiled.invoke(ReactState(messages=[{"role": "user", "content": "search for AI news"}]))
+```
+
+
 
 ## Execution Modes
 

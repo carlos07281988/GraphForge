@@ -65,7 +65,11 @@ print(result.messages)  # ["processed"]
   - [Graph & CompiledGraph](#graph--compiledgraph)
   - [条件路由](#条件路由)
   - [Pipeline](#pipeline)
+  - [节点级重试与错误回退](#节点级重试与错误回退)
+  - [子图输入/输出映射](#子图输入输出映射)
   - [A2A（Agent-to-Agent）协议](#a2aagent-to-agent协议)
+  - [智能体（ToolNode + ReAct）](#智能体toolnode--react)
+  - [智能体（ToolNode + ReAct）](#智能体toolnode--react)
 - [执行模式](#执行模式)
   - [Invoke](#invoke)
   - [Streaming](#streaming)
@@ -259,6 +263,63 @@ pipe = Pipeline[AgentState]([
 graph.add_node("preprocess", pipe)
 ```
 
+
+### 节点级重试与错误回退
+
+节点可配置自动重试，图可在节点重试耗尽后路由到备用节点。
+
+**重试：** ``add_node()`` 传递 ``retry=N``：
+
+```python
+def flaky_node(state) -> dict:
+    return {"x": 1}
+
+graph.add_node("不稳定节点", flaky_node, retry=3)
+```
+
+执行器会最多重试 ``retry + 1`` 次。
+
+**错误边：** 使用 ``add_error_edge()`` 定义备用路径：
+
+```python
+graph.add_node("主节点", flaky_node)
+graph.add_node("备用节点", fallback)
+graph.add_error_edge("主节点", "备用节点")
+```
+
+当主节点异常且重试耗尽后，执行自动转到备用节点。
+
+
+### 子图输入/输出映射
+
+将子图嵌入为节点时，可以通过 ``input_map`` 和 ``output_map`` 声明父状态与子图状态之间的映射。
+
+```python
+class 父状态(GraphState):
+    query: str = ""
+    result: str = ""
+
+class 子状态(GraphState):
+    prompt: str = ""
+    output: str = ""
+
+sub = (
+    Graph[子状态]()
+    .add_node("处理", lambda s: {"output": f"结果: {s.prompt}"})
+    .add_edge("处理", "__end__")
+    .set_entry_point("处理")
+    .compile(
+        state_type=子状态,
+        input_map={"query": "prompt"},
+        output_map={"output": "result"},
+    )
+)
+
+parent = Graph[父状态]().add_node("sub", sub).add_edge("sub", "__end__").set_entry_point("sub").compile()
+result = parent.invoke(父状态(query="hello"))
+print(result.result)  # "结果: hello"
+```
+
 ### A2A（Agent-to-Agent）协议
 
 GraphForge 内置了对 Google [Agent-to-Agent (A2A)](https://google.github.io/A2A/) 开放协议的支持，
@@ -343,6 +404,47 @@ GET  /tasks/{id}                  # 任务状态查询
 POST /tasks/{id}/cancel           # 取消任务
 
 ---
+
+### 智能体（ToolNode + ReAct）
+
+GraphForge 内置了智能体模式和工具调用支持，位于 ``graphforge.agents`` 模块。
+
+**ToolNode** — 调用 LLM、执行工具调用、将结果追加到消息列表的节点：
+
+```python
+from graphforge.agents import ToolNode
+
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "搜索",
+        },
+        "_func": search,
+    }
+]
+
+graph.add_node("agent", ToolNode(llm, tools=tools))
+```
+
+**路由** — ``has_tool_calls()`` 检查最后一条消息是否包含工具调用：
+
+```python
+graph.add_conditional_edges("agent", has_tool_calls, {
+    "tools": "tools",
+    "end": "__end__",
+})
+```
+
+**ReAct 智能体** — ``create_react_agent()`` 一键构建完整的推理+行动循环：
+
+```python
+graph = create_react_agent(llm, tools=tools)
+compiled = graph.compile(state_type=ReactState)
+result = compiled.invoke(ReactState(messages=[{"role": "user", "content": "搜索 AI 新闻"}]))
+```
+
 
 ## 执行模式
 
