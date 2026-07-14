@@ -78,7 +78,6 @@ print(result.messages)  # ["processed"]
   - [Subgraph I/O Mapping](#subgraph-io-mapping)
   - [A2A (Agent-to-Agent) Protocol](#a2a-agent-to-agent-protocol)
   - [Agents (ToolNode + ReAct)](#agents-toolnode--react)
-  - [Agents (ToolNode + ReAct)](#agents-toolnode--react)
 - [Execution Modes](#execution-modes)
   - [Invoke](#invoke)
   - [Streaming](#streaming)
@@ -684,13 +683,15 @@ compiled.invoke(state, callbacks=manager)
 
 | Method | Returns | Description |
 |---|---|---|
-| `add_node(name, fn, metadata=None)` | `Self` | Register a node |
+| `add_node(name, fn, *, retry=0, timeout=None, metadata=None)` | `Self` | Register a node with optional retry |
 | `add_edge(source, target)` | `Self` | Unconditional edge |
+| `add_error_edge(source, fallback)` | `Self` | Route to fallback node on error |
 | `add_conditional_edges(source, router, path_map)` | `Self` | Conditional routing |
+| `add_fanout(source, targets, join=None)` | `Self` | Parallel fan-out execution |
 | `set_entry_point(name)` | `Self` | Define start node |
 | `set_finish_point(name)` | `Self` | Define terminal node |
 | `set_metadata(key, value)` | `Self` | Attach metadata |
-| `compile(checkpointer=None, name=None, state_type=None)` | `CompiledGraph` | Freeze and validate |
+| `compile(*, input_map=None, output_map=None, checkpointer=None, name=None, state_type=None)` | `CompiledGraph` | Freeze and validate |
 
 ### `CompiledGraph[StateT]`
 
@@ -702,13 +703,41 @@ compiled.invoke(state, callbacks=manager)
 | `astream(state, config=None, callbacks=None)` | `AsyncGenerator[StreamEvent]` | Async streaming |
 | `resume(thread_id, state_type=None, updates=None, config=None, callbacks=None)` | `StateT` | Resume from last checkpoint |
 | `aresume(thread_id, state_type=None, updates=None, config=None, callbacks=None)` | `StateT` | Async resume |
-| Properties: `name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata`, `state_type` |  | Read-only |
+| Properties: `name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata`, `state_type`, `input_map`, `output_map`, `error_map` |  | Read-only |
 
 ### `GraphState`
 
 | Method | Returns | Description |
 |---|---|---|
 | `apply(**updates)` | `Self` | Immutable merge of field updates |
+
+
+### `Node`
+
+| Property | Type | Description |
+|---|---|---|
+| `name` | `str` | Node identifier |
+| `kind` | `NodeKind` | Runtime classification (function, async, subgraph, etc.) |
+| `retry` | `int` | Number of retry attempts on failure |
+| `timeout` | `float | None` | Maximum execution time in seconds |
+| `metadata` | `dict` | Optional user-defined metadata |
+
+### Agents
+
+| Function | Description |
+|---|---|
+| `ToolNode(llm_func, tools, state_messages_field="messages")` | Create a tool-calling agent node |
+| `has_tool_calls(state, field="messages")` | Conditional router: returns `"tools"` or `"end"` |
+| `create_react_agent(llm_func, tools, state_type=None)` | Build a ReAct agent graph |
+
+### Edge Types
+
+| Class | Description |
+|---|---|
+| `DirectEdge(source, target)` | Unconditional edge |
+| `ConditionalEdge(source, router, path_map)` | Conditional edge with router function |
+| `ErrorEdge(source, fallback)` | Error-handling edge (fallback on failure) |
+| `FanOutEdge(source, targets, join=None)` | Parallel fan-out edge |
 
 ### `Pipeline[StateT]`
 
@@ -741,10 +770,11 @@ GraphState, Append, MergeStrategy, node_field,
 Pipeline,
 EventType, StreamEvent,
 Checkpoint, Checkpointer, CheckpointKey, InMemoryCheckpointer,
-SqliteCheckpointer,
-GraphExecutionPaused,
+SqliteCheckpointer, RedisCheckpointer,
+GraphExecutionPaused, ErrorEdge,
 Callback, CallbackManager,
 configure_logging, get_logger,
+export_dot, render_graph,
 NodeFunc, AsyncNodeFunc, RouterFunc, AsyncRouterFunc,
 StreamingNodeFunc, AsyncStreamingNodeFunc,
 NodeName, StateUpdate, ConfigDict

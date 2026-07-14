@@ -69,7 +69,6 @@ print(result.messages)  # ["processed"]
   - [子图输入/输出映射](#子图输入输出映射)
   - [A2A（Agent-to-Agent）协议](#a2aagent-to-agent协议)
   - [智能体（ToolNode + ReAct）](#智能体toolnode--react)
-  - [智能体（ToolNode + ReAct）](#智能体toolnode--react)
 - [执行模式](#执行模式)
   - [Invoke](#invoke)
   - [Streaming](#streaming)
@@ -607,14 +606,15 @@ compiled.invoke(state, callbacks=manager)
 
 | 方法 | 返回 | 描述 |
 |---|---|---|
-| `add_node(name, fn, metadata=None)` | `Self` | 注册节点 |
+| `add_node(name, fn, *, retry=0, timeout=None, metadata=None)` | `Self` | 注册节点（支持重试） |
 | `add_edge(source, target)` | `Self` | 无条件边 |
+| `add_error_edge(source, fallback)` | `Self` | 错误回退边 |
 | `add_conditional_edges(source, router, path_map)` | `Self` | 条件路由 |
 | `add_fanout(source, targets, join=None)` | `Self` | 并行分支 |
 | `set_entry_point(name)` | `Self` | 设置起始节点 |
 | `set_finish_point(name)` | `Self` | 设置终止节点 |
 | `set_metadata(key, value)` | `Self` | 附加元数据 |
-| `compile(checkpointer=None, name=None, state_type=None)` | `CompiledGraph` | 冻结并验证 |
+| `compile(*, input_map=None, output_map=None, checkpointer=None, name=None, state_type=None)` | `CompiledGraph` | 冻结并验证 |
 
 ### `CompiledGraph[StateT]`
 
@@ -626,7 +626,7 @@ compiled.invoke(state, callbacks=manager)
 | `astream(state, config=None, callbacks=None)` | `AsyncGenerator[StreamEvent]` | 异步流式 |
 | `resume(thread_id, state_type=None, updates=None, ...)` | `StateT` | 从检查点恢复 |
 | `aresume(thread_id, state_type=None, updates=None, ...)` | `StateT` | 异步恢复 |
-| 属性：`name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata`, `state_type` | | 只读 |
+| 属性：`name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata`, `state_type`, `input_map`, `output_map`, `error_map` | | 只读 |
 
 ### 图可视化
 
