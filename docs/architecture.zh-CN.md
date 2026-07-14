@@ -379,7 +379,89 @@ result = compiled.resume("session-1", state_type=MyState, updates={"input": "yes
 
 ---
 
-## 8. 对比
+
+## 8. A2A（Agent-to-Agent）协议
+
+GraphForge 实现了 Google 的 [Agent-to-Agent (A2A) 开放协议](https://google.github.io/A2A/),
+通过 `graphforge/a2a/` 模块提供原生支持。这使得 GraphForge agent 能与任何支持 A2A 标准的
+框架构建的 agent 互相通信。
+
+### 8.1 模块结构
+
+```
+graphforge/a2a/
+├── __init__.py          # 公开 API 导出
+├── _models.py           # Pydantic v2 模型：AgentCard, Task, Message, Part 等
+├── _client.py           # A2AClient（异步）+ SyncA2AClient（同步封装）
+├── _server.py           # A2AServer — 封装 CompiledGraph 的 HTTP 服务器
+└── _agent_node.py       # 出站 A2A 调用的节点工厂
+```
+
+### 8.2 出站集成
+
+`A2AClient` 通过标准任务端点连接远程 A2A agent。
+`create_a2a_agent_node()` 工厂函数将客户端包装为图节点，使调用远程 agent
+与调用普通节点一样简单。
+
+数据流：
+```
+Graph State  ──→  input_mapper  ──→  A2A Message  ──→  HTTP POST /tasks/send
+                                                  ┌──  A2A Task (response)
+State Update  ←──  output_mapper  ←──  Message     ←──┘
+```
+
+### 8.3 入站集成
+
+`A2AServer` 包装一个 `CompiledGraph`，在 HTTP 端口上暴露兼容 A2A 的端点。
+其他框架的 agent 可以通过标准协议发现、调用和监控你的图。
+
+数据流：
+```
+A2A Client  ──→  POST /tasks/send  ──→  state_factory  ──→  GraphState
+                                                              │
+                                                          CompiledGraph
+                                                              │
+A2A Client  ←──  Task (response)  ←──  result_mapper  ←────  GraphState (final)
+```
+
+### 8.4 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/.well-known/agent-card` | Agent 发现文档 |
+| POST | `/tasks/send` | 创建任务并等待完成 |
+| POST | `/tasks/sendStream` | 创建任务（SSE 流式） |
+| GET | `/tasks/{id}` | 查询任务状态 |
+| POST | `/tasks/{id}/cancel` | 取消运行中的任务 |
+
+### 8.5 协议类型
+
+所有 A2A 协议类型均以 Pydantic v2 模型定义在 `_models.py` 中：
+
+- **Part**：`TextPart`, `DataPart`, `FilePart` — 消息内容单元
+- **Message**：role（user/agent）+ parts 列表
+- **Task**：ID + 状态（submitted/working/input-required/completed/failed/canceled）
+- **AgentCard**：名称、描述、能力、认证方式、端点信息
+- **TaskSendRequest/Response**：标准请求/响应信封
+
+### 8.6 认证
+
+`A2AServer` 通过 `api_key` 参数支持 Bearer Token 认证。
+客户端需要在请求中包含 `Authorization: Bearer <api_key>`。
+
+`A2AClient` 接受 `api_key` 参数，每次请求自动发送。
+
+### 8.7 依赖
+
+A2A 模块为可选项。安装方式：
+
+```bash
+pip install graphforge[a2a]
+```
+
+这会添加 `aiohttp>=3.9` 运行时依赖。
+
+## 9. 对比
 
 | 方面 | LangGraph | LangChain | GraphForge |
 |---|---|---|---|
@@ -397,7 +479,7 @@ result = compiled.resume("session-1", state_type=MyState, updates={"input": "yes
 
 ---
 
-## 9. 设计决策与理由
+## 10. 设计决策与理由
 
 ### 9.1 为什么用 Pydantic v2 而不是 TypedDict？
 
@@ -440,7 +522,7 @@ result = compiled.resume("session-1", state_type=MyState, updates={"input": "yes
 
 ---
 
-## 10. 扩展点
+## 11. 扩展点
 
 ### 10.1 自定义状态字段类型
 

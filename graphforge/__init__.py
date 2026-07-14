@@ -94,3 +94,9 @@ __all__.extend(["__version__", "__version_info__",
     "GraphExecutionPaused", "SqliteCheckpointer"])
 
 _logger.debug("GraphForge %s loaded", __version__)
+
+# Optionally register the a2a subpackage
+try:
+    from graphforge import a2a  # type: ignore[import-untyped]
+except ImportError:
+    pass

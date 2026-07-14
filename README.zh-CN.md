@@ -65,6 +65,7 @@ print(result.messages)  # ["processed"]
   - [Graph & CompiledGraph](#graph--compiledgraph)
   - [条件路由](#条件路由)
   - [Pipeline](#pipeline)
+  - [A2A（Agent-to-Agent）协议](#a2aagent-to-agent协议)
 - [执行模式](#执行模式)
   - [Invoke](#invoke)
   - [Streaming](#streaming)
@@ -257,6 +258,89 @@ pipe = Pipeline[AgentState]([
 # 作为图节点使用
 graph.add_node("preprocess", pipe)
 ```
+
+### A2A（Agent-to-Agent）协议
+
+GraphForge 内置了对 Google [Agent-to-Agent (A2A)](https://google.github.io/A2A/) 开放协议的支持，
+让基于 GraphForge 构建的 agent 能够与任何其他框架的 agent 互相通信。
+
+A2A 模块提供**出站**和**入站**两个方向的集成：
+
+| 方向 | 机制 | 使用场景 |
+|---|---|---|
+| **出站**（GraphForge → 远程 agent） | `create_a2a_agent_node()` | 在图内调用第三方 agent |
+| **入站**（远程 agent → GraphForge） | `A2AServer` | 把你的图暴露为标准 A2A 端点 |
+
+**安装：**
+
+```bash
+pip install graphforge[a2a]   # 会自动安装 aiohttp
+```
+
+#### 出站：调用外部 Agent
+
+```python
+from graphforge.a2a import create_a2a_agent_node
+
+# 创建一个委托给远程 A2A agent 的节点
+get_weather = create_a2a_agent_node("http://weather-agent:8080")
+
+# 像普通节点一样使用
+graph.add_node("get_weather", get_weather)
+graph.add_edge("user_input", "get_weather")
+```
+
+通过自定义映射器（mapper）控制图状态与 A2A 消息之间的转换：
+
+```python
+def my_input(state) -> Message:
+    return Message(role="user", parts=[TextPart(text=state.prompt)])
+
+def my_output(msg, task) -> dict:
+    text = msg.parts[0].text if msg and msg.parts else "done"
+    return {"messages": Append([{"role": "assistant", "content": text}])}
+
+node = create_a2a_agent_node(
+    "http://agent:8080",
+    input_mapper=my_input,
+    output_mapper=my_output,
+)
+```
+
+#### 入站：将 Graph 暴露为 A2A Agent
+
+```python
+from graphforge.a2a import A2AServer, AgentCard, AgentSkill
+
+card = AgentCard(
+    name="SupportBot",
+    description="客服 agent",
+    capabilities=AgentCapabilities(
+        skills=[AgentSkill(id="triage", name="问题分类")],
+    ),
+)
+
+server = A2AServer(
+    compiled_graph,
+    agent_card=card,
+    host="0.0.0.0",
+    port=8080,
+)
+
+server.run()                    # 阻塞启动
+# 或异步启动/停止
+await server.start()
+await server.stop()
+```
+
+启动后，任何兼容 A2A 的 agent 都可以通过以下端点发现并调用你的图：
+
+```
+GET  /.well-known/agent-card     # 服务发现
+POST /tasks/send                  # 同步任务
+POST /tasks/sendStream            # 流式任务（SSE）
+GET  /tasks/{id}                  # 任务状态查询
+POST /tasks/{id}/cancel           # 取消任务
 
 ---
 

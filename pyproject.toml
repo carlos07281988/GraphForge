@@ -28,6 +28,9 @@ dependencies = [
     "typing_extensions>=4.0",
 ]
 
+[project.optional-dependencies]
+a2a = ["aiohttp>=3.9"]
+
 [project.urls]
 Homepage = "https://github.com/carlos07281988/GraphForge"
 Repository = "https://github.com/carlos07281988/GraphForge.git"

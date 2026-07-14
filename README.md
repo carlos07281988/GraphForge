@@ -74,6 +74,7 @@ print(result.messages)  # ["processed"]
   - [Graph & CompiledGraph](#graph--compiledgraph)
   - [Conditional Routing](#conditional-routing)
   - [Pipeline](#pipeline)
+  - [A2A (Agent-to-Agent) Protocol](#a2a-agent-to-agent-protocol)
 - [Execution Modes](#execution-modes)
   - [Invoke](#invoke)
   - [Streaming](#streaming)
@@ -261,6 +262,96 @@ pipe = Pipeline[AgentState]([
 # Use as a graph node
 graph.add_node("preprocess", pipe)
 ```
+
+### A2A (Agent-to-Agent) Protocol
+
+GraphForge includes built-in support for Google's [Agent-to-Agent (A2A)](https://google.github.io/A2A/) open protocol,
+enabling agents built with GraphForge to communicate with agents built on any other framework
+(and vice versa).
+
+The A2A module provides both **outbound** and **inbound** integration:
+
+| Direction | Mechanism | Use Case |
+|---|---|---|
+| **Outbound** (GraphForge → remote agent) | `create_a2a_agent_node()` | Call a third-party agent from within your graph |
+| **Inbound** (remote agent → GraphForge) | `A2AServer` | Expose your graph as a standard A2A endpoint |
+
+**Installation:**
+
+```bash
+pip install graphforge[a2a]    # adds aiohttp dependency
+```
+
+#### Outbound: Calling an External Agent
+
+```python
+from graphforge.a2a import create_a2a_agent_node
+
+# Create a node that delegates to a remote A2A agent
+call_weather = create_a2a_agent_node("http://weather-agent:8080")
+
+# Use it like any other node
+graph.add_node("get_weather", call_weather)
+graph.add_edge("user_input", "get_weather")
+```
+
+Custom mappers let you control how graph state maps to A2A messages and back:
+
+```python
+def custom_input(state) -> Message:
+    prompt = state.prompt or str(state)
+    return Message(role="user", parts=[TextPart(text=prompt)])
+
+def custom_output(msg, task) -> dict:
+    text = msg.parts[0].text if msg and msg.parts else "done"
+    return {"messages": Append([{"role": "assistant", "content": text}])}
+
+node = create_a2a_agent_node(
+    "http://agent:8080",
+    input_mapper=custom_input,
+    output_mapper=custom_output,
+)
+```
+
+#### Inbound: Exposing a Graph as an A2A Agent
+
+```python
+from graphforge.a2a import A2AServer, AgentCard, AgentSkill
+
+card = AgentCard(
+    name="SupportBot",
+    description="Customer support agent",
+    capabilities=AgentCapabilities(
+        skills=[AgentSkill(id="triage", name="Issue triage")],
+    ),
+)
+
+server = A2AServer(
+    compiled_graph,
+    agent_card=card,
+    host="0.0.0.0",
+    port=8080,
+)
+
+# Blocking entry point
+server.run()
+
+# Or start/stop manually
+await server.start()
+# ... serve requests ...
+await server.stop()
+```
+
+Once running, any A2A-compatible agent can discover and call your graph at:
+
+```
+GET  /.well-known/agent-card     # Discovery
+POST /tasks/send                  # Synchronous task
+POST /tasks/sendStream            # Streaming task (SSE)
+GET  /tasks/{id}                  # Task status
+POST /tasks/{id}/cancel           # Cancel task
+```
+
 
 ---
 

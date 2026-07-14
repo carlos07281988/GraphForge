@@ -13,6 +13,12 @@
 5. [Graph Execution Lifecycle](#5-graph-execution-lifecycle)
 6. [Streaming Architecture](#6-streaming-architecture)
 7. [Checkpointing Model](#7-checkpointing-model)
+8. [A2A (Agent-to-Agent) Protocol](#8-a2a-agent-to-agent-protocol)
+8. [A2A (Agent-to-Agent) Protocol](#8-a2a-agent-to-agent-protocol)
+9. [Comparison: GraphForge vs LangGraph vs LangChain](#9-comparison)
+10. [Design Decisions & Rationale](#10-design-decisions--rationale)
+11. [Extension Points](#11-extension-points)
+12. [Glossary](#12-glossary)
 8. [Comparison: GraphForge vs LangGraph vs LangChain](#8-comparison)
 9. [Design Decisions & Rationale](#9-design-decisions--rationale)
 10. [Extension Points](#10-extension-points)
@@ -373,7 +379,90 @@ This enables long-running agents and human-in-the-loop workflows.
 
 ---
 
-## 8. Comparison
+
+## 8. A2A (Agent-to-Agent) Protocol
+
+GraphForge implements Google's [Agent-to-Agent (A2A) open protocol](https://google.github.io/A2A/)
+as a first-class module at `graphforge/a2a/`. This enables GraphForge agents to communicate
+with agents built on any other framework that also supports the A2A standard.
+
+### 8.1 Module Layout
+
+```
+graphforge/a2a/
+├── __init__.py          # Public API exports
+├── _models.py           # Pydantic v2 models: AgentCard, Task, Message, Part, etc.
+├── _client.py           # A2AClient (async) + SyncA2AClient
+├── _server.py           # A2AServer — HTTP server wrapping a CompiledGraph
+└── _agent_node.py       # Node factories for outbound A2A calls
+```
+
+### 8.2 Outbound Integration
+
+The `A2AClient` connects to any remote A2A agent via the standard task endpoints.
+The `create_a2a_agent_node()` factory wraps this client as a graph node, so calling
+a remote agent looks like any other node in your graph.
+
+Data flow:
+```
+Graph State  ──→  input_mapper  ──→  A2A Message  ──→  HTTP POST /tasks/send
+                                                  ┌──  A2A Task (response)
+State Update  ←──  output_mapper  ←──  Message     ←──┘
+```
+
+### 8.3 Inbound Integration
+
+The `A2AServer` wraps a `CompiledGraph` and exposes its A2A-compatible endpoints
+on an HTTP port. Other agents (regardless of framework) can discover, invoke,
+and monitor the graph via the standard protocol.
+
+Data flow:
+```
+A2A Client  ──→  POST /tasks/send  ──→  state_factory  ──→  GraphState
+                                                              │
+                                                          CompiledGraph
+                                                              │
+A2A Client  ←──  Task (response)  ←──  result_mapper  ←────  GraphState (final)
+```
+
+### 8.4 Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/.well-known/agent-card` | Agent discovery document |
+| POST | `/tasks/send` | Create task and wait for completion |
+| POST | `/tasks/sendStream` | Create task with SSE streaming |
+| GET | `/tasks/{id}` | Query task status |
+| POST | `/tasks/{id}/cancel` | Cancel a running task |
+
+### 8.5 Protocol Types
+
+All A2A protocol types are defined as Pydantic v2 models in `_models.py`:
+
+- **Part**: `TextPart`, `DataPart`, `FilePart` — message content units
+- **Message**: role (user/agent) + list of parts
+- **Task**: ID + status (submitted/working/input-required/completed/failed/canceled)
+- **AgentCard**: name, description, capabilities, authentication, endpoints
+- **TaskSendRequest/Response**: Standard request/response envelope
+
+### 8.6 Authentication
+
+The `A2AServer` supports Bearer token authentication via the `api_key` parameter.
+Clients must include `Authorization: Bearer <api_key>` in their requests.
+
+The `A2AClient` accepts an `api_key` parameter that is sent on every request.
+
+### 8.7 Dependencies
+
+The A2A module is optional. Install with:
+
+```bash
+pip install graphforge[a2a]
+```
+
+This adds `aiohttp>=3.9` as a runtime dependency.
+
+## 9. Comparison
 
 | Aspect | LangGraph | LangChain | GraphForge |
 |---|---|---|---|
@@ -406,7 +495,7 @@ This enables long-running agents and human-in-the-loop workflows.
 
 ---
 
-## 9. Design Decisions & Rationale
+## 10. Design Decisions & Rationale
 
 ### 9.1 Why Pydantic v2 vs TypedDict?
 
@@ -467,7 +556,7 @@ This enables long-running agents and human-in-the-loop workflows.
 
 ---
 
-## 10. Extension Points
+## 11. Extension Points
 
 ### 10.1 Custom State Field Types
 
@@ -510,7 +599,7 @@ configure_logging(level=logging.DEBUG)
 
 ---
 
-## 11. Glossary
+## 12. Glossary
 
 | Term | Definition |
 |---|---|
