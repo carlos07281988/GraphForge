@@ -19,6 +19,7 @@ from collections.abc import AsyncGenerator, Generator
 from typing import Any, Dict, List, Optional, Sequence
 
 from graphforge._callbacks import CallbackManager
+from graphforge._command import Command
 from graphforge._checkpoint import Checkpointer, InMemoryCheckpointer
 from graphforge._edge import ConditionalEdge, FanOutEdge
 from graphforge._graph import CompiledGraph
@@ -166,13 +167,21 @@ class SyncExecutor:
                         self._callbacks.on_node_error(node_name, exc)
                         raise
 
-            logger.debug("Node %r produced updates: %s", node_name, list(updates.keys()))
+            # Command API: dynamic node routing
+            if isinstance(updates, Command):
+                if updates.update:
+                    state = _apply(state, updates.update)
+                node_name = updates.goto
+                logger.debug("Command routing to %r", node_name)
+                step += 1
+                continue
             # Check for fallback routing
             if "_fallback_to" in updates:
                 node_name = updates["_fallback_to"]
                 logger.warning("Routing to fallback %r", node_name)
                 step += 1
                 continue
+            logger.debug("Node %r produced updates: %s", node_name, list(updates.keys()))
             new_state = _apply(state, updates)
             logger.debug("State after %r: %s", node_name, _dump(new_state))
             self._callbacks.on_state_update(node_name, updates, _dump(new_state))

@@ -445,3 +445,138 @@ class TestGraphSerialisation:
         assert data["node_specs"] == {}
         assert data["entry_point"] is None
         assert data["direct_edges"] == []
+
+
+# =====================================================================
+# Feature 5: Command API
+# =====================================================================
+
+
+class CmdState(GraphState):
+    x: int = 0
+    path: str = ""
+
+
+class TestCommandAPI:
+    def test_command_routes_to_target(self) -> None:
+        from graphforge import Command
+
+        def router(state: CmdState) -> Union[Dict, Command]:
+            if state.x > 0:
+                return Command(goto="positive", update={"x": state.x * 2})
+            return Command(goto="negative", update={"x": -1})
+
+        def positive(state: CmdState) -> dict:
+            return {"path": "pos"}
+
+        def negative(state: CmdState) -> dict:
+            return {"path": "neg"}
+
+        graph = (
+            Graph[CmdState]()
+            .add_node("router", router)
+            .add_node("positive", positive)
+            .add_node("negative", negative)
+            .add_edge("router", "__end__")  # default edge (overridden by Command)
+            .add_edge("positive", "__end__")
+            .add_edge("negative", "__end__")
+            .set_entry_point("router")
+            .compile()
+        )
+
+        result = graph.invoke(CmdState(x=5))
+        assert result.path == "pos"
+        assert result.x == 10  # 5 * 2
+
+    def test_command_negative_case(self) -> None:
+        from graphforge import Command
+
+        def router(state: CmdState) -> Union[Dict, Command]:
+            if state.x > 0:
+                return Command(goto="positive", update={"x": state.x * 2})
+            return Command(goto="negative", update={"x": -1})
+
+        def positive(state: CmdState) -> dict:
+            return {"path": "pos"}
+
+        def negative(state: CmdState) -> dict:
+            return {"path": "neg"}
+
+        graph = (
+            Graph[CmdState]()
+            .add_node("router", router)
+            .add_node("positive", positive)
+            .add_node("negative", negative)
+            .add_edge("router", "__end__")  # default edge
+            .add_edge("positive", "__end__")
+            .add_edge("negative", "__end__")
+            .set_entry_point("router")
+            .compile()
+        )
+
+        result = graph.invoke(CmdState(x=0))
+        assert result.path == "neg"
+        assert result.x == -1
+
+    def test_command_overrides_default_edge(self) -> None:
+        from graphforge import Command
+
+        def always_route_to_positive(state: CmdState) -> Command:
+            return Command(goto="positive")
+
+        g = (
+            Graph[CmdState]()
+            .add_node("start", always_route_to_positive)
+            .add_node("positive", lambda s: {"path": "hit"})
+            .add_edge("start", "__end__")  # Would normally go to end
+            .add_edge("positive", "__end__")
+            .set_entry_point("start")
+            .compile()
+        )
+        result = g.invoke(CmdState(x=1))
+        assert result.path == "hit"
+
+    def test_command_no_update_keeps_state(self) -> None:
+        from graphforge import Command
+
+        def router(state: CmdState) -> Command:
+            return Command(goto="next")
+
+        g = (
+            Graph[CmdState]()
+            .add_node("router", router)
+            .add_node("next", lambda s: {"x": s.x + 10})
+            .add_edge("router", "__end__")
+            .add_edge("next", "__end__")
+            .set_entry_point("router")
+            .compile()
+        )
+        result = g.invoke(CmdState(x=7))
+        assert result.x == 17  # 7 + 10 from next node
+
+    def test_command_in_retried_node(self) -> None:
+        from graphforge import Command
+
+        counter = [0]
+
+        def flaky_then_route(state: CmdState) -> Union[Dict, Command]:
+            counter[0] += 1
+            if counter[0] < 2:
+                raise ValueError("will retry")
+            return Command(goto="target", update={"x": 99})
+
+        def target(state: CmdState) -> dict:
+            return {"path": "reached"}
+
+        g = (
+            Graph[CmdState]()
+            .add_node("source", flaky_then_route, retry=2)
+            .add_node("target", target)
+            .add_edge("source", "__end__")
+            .add_edge("target", "__end__")
+            .set_entry_point("source")
+            .compile()
+        )
+        result = g.invoke(CmdState(x=0))
+        assert result.path == "reached"
+        assert result.x == 99
