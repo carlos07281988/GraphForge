@@ -64,6 +64,10 @@ __all__ = [
     "CallbackManager",
     # Edge
     "FanOutEdge",
+    # Visualise
+    "export_dot",
+    "render_graph",
+    # Visualization
     # Logging
     "GraphExecutionPaused",
     "configure_logging",
@@ -78,6 +82,9 @@ __all__ = [
     "RouterFunc",
     "StateUpdate",
     "StreamingNodeFunc",
+    # Visualization
+    "export_dot",
+    "render_graph",
 ]
 
 # Version

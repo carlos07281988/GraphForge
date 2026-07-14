@@ -33,7 +33,8 @@ from typing import (
     cast,
 )
 
-from pydantic import BaseModel, ConfigDict as PydanticConfigDict, Field
+from pydantic import BaseModel, Field
+from graphforge._compat import IS_PYDANTIC_V2, PydanticConfigDict, model_copy as _compat_model_copy
 from typing_extensions import Self
 
 from graphforge._logging import get_logger
@@ -175,7 +176,7 @@ def merge_state(
             resolved[key] = reducer.func(old_val, new_val)
 
     logger.debug("merge_state: resolved %d fields: %s", len(resolved), list(resolved.keys()))
-    return state.model_copy(update=resolved, deep=True)
+    return _compat_model_copy(state, update=resolved, deep=True)
 
 
 # ---------------------------------------------------------------------------
@@ -269,8 +270,14 @@ class GraphState(BaseModel):
         extra="forbid",
         validate_assignment=True,
         frozen=False,
-        arbitrary_types_allowed=True,
-    )
+    arbitrary_types_allowed=True,
+)
+
+    if not IS_PYDANTIC_V2:
+        class Config:
+            extra = "forbid"
+            validate_assignment = True
+            arbitrary_types_allowed = True
 
     def apply(self, **updates: Any) -> Self:
         """Return a new state instance with *updates* merged in.

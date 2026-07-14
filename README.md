@@ -669,10 +669,10 @@ execution, streaming, checkpointing, callbacks, and pipelines.
 - [x] `resume()` API for long-running agents — checkpoint-based resumption with pause/retry support
 - [x] SQLite checkpointer — persistent state storage with full CRUD, metadata, and thread safety
 - [x] Parallel / fan-out node execution — add_fanout() API, async parallel via asyncio.gather, sync sequential, join support
-- [ ] Graph visualisation (graphviz / networkx export)
 - [x] Subgraph checkpoint isolation — automatic thread_id prefix for nested graphs, shared checkpointer support
-- [ ] Redis checkpointer
-- [ ] Pydantic v1 compatibility
+ - [x] Graph visualisation — export_dot() to DOT format, render_graph() to image
+ - [x] Redis checkpointer — distributed state persistence via Redis
+ - [x] Pydantic v1 compatibility — unified compat layer for v1/v2 APIs
 
 ---
 
