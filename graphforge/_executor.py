@@ -131,11 +131,48 @@ class SyncExecutor:
                 self._callbacks.on_graph_end(graph.name, _dump(state))
                 return state
             except Exception as exc:
-                logger.exception("Node %r failed at step %d", node_name, step)
-                self._callbacks.on_node_error(node_name, exc)
-                raise
+                # Retry logic
+                if node.retry > 0:
+                    logger.info("Node %r failed (attempt 1/%d), retrying...", node_name, node.retry + 1)
+                    for attempt in range(1, node.retry + 1):
+                        try:
+                            updates = node.invoke(state)
+                            break
+                        except GraphExecutionPaused:
+                            raise
+                        except Exception as retry_exc:
+                            last_err = retry_exc
+                            if attempt < node.retry:
+                                logger.info("Node %r failed (attempt %d/%d), retrying...", node_name, attempt + 1, node.retry + 1)
+                                continue
+                            # All retries exhausted — try fallback
+                            fallback_target = graph.error_map.get(node_name)
+                            if fallback_target:
+                                logger.warning("Node %r failed after %d attempts, falling back to %r", node_name, node.retry + 1, fallback_target)
+                                self._callbacks.on_node_error(node_name, last_err)
+                                updates = {"_fallback_to": fallback_target}
+                                break
+                            self._callbacks.on_node_error(node_name, last_err)
+                            raise last_err
+                else:
+                    # No retry — try fallback
+                    fallback_target = graph.error_map.get(node_name)
+                    if fallback_target:
+                        logger.warning("Node %r failed, falling back to %r", node_name, fallback_target)
+                        self._callbacks.on_node_error(node_name, exc)
+                        updates = {"_fallback_to": fallback_target}
+                    else:
+                        logger.exception("Node %r failed at step %d", node_name, step)
+                        self._callbacks.on_node_error(node_name, exc)
+                        raise
 
             logger.debug("Node %r produced updates: %s", node_name, list(updates.keys()))
+            # Check for fallback routing
+            if "_fallback_to" in updates:
+                node_name = updates["_fallback_to"]
+                logger.warning("Routing to fallback %r", node_name)
+                step += 1
+                continue
             new_state = _apply(state, updates)
             logger.debug("State after %r: %s", node_name, _dump(new_state))
             self._callbacks.on_state_update(node_name, updates, _dump(new_state))

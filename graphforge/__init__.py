@@ -28,7 +28,7 @@ from graphforge._checkpoint import (
 from graphforge._checkpoint_sqlite import SqliteCheckpointer
 from graphforge._checkpoint_redis import RedisCheckpointer
 from graphforge._callbacks import Callback, CallbackManager
-from graphforge._edge import FanOutEdge
+from graphforge._edge import ErrorEdge, FanOutEdge
 from graphforge._executor import GraphExecutionPaused
 from graphforge._visualize import export_dot, render_graph
 from graphforge._logging import configure_logging, get_logger
@@ -63,6 +63,7 @@ __all__ = [
     "Callback",
     "CallbackManager",
     # Edge
+    "ErrorEdge",
     "FanOutEdge",
     # Visualise
     "export_dot",

@@ -25,7 +25,7 @@ from typing import (
     Union,
 )
 
-from graphforge._edge import AnyEdge, ConditionalEdge, DirectEdge, FanOutEdge
+from graphforge._edge import AnyEdge, ConditionalEdge, DirectEdge, ErrorEdge, FanOutEdge
 from graphforge._logging import get_logger
 from graphforge._node import Node, NodeKind
 from graphforge._types import (
@@ -67,6 +67,7 @@ class Graph(Generic[StateT]):
         "_direct_edges",
         "_conditional_edges",
         "_fanout_edges",
+        "_error_edges",
         "_entry_point",
         "_finish_points",
         "_metadata",
@@ -77,6 +78,7 @@ class Graph(Generic[StateT]):
         self._direct_edges: List[DirectEdge[StateT]] = []
         self._conditional_edges: List[ConditionalEdge[StateT]] = []
         self._fanout_edges: List[FanOutEdge[StateT]] = []
+        self._error_edges: List[ErrorEdge[StateT]] = []
         self._entry_point: Optional[NodeName] = None
         self._finish_points: Set[NodeName] = set()
         self._metadata: Dict[str, Any] = {}
@@ -95,6 +97,9 @@ class Graph(Generic[StateT]):
             "Pipeline[StateT]",
             Node[StateT],
         ],
+        *,
+        retry: int = 0,
+        timeout: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Graph[StateT]:
         if name in self._nodes:
@@ -104,7 +109,7 @@ class Graph(Generic[StateT]):
         if isinstance(fn, Node):
             node = fn
         else:
-            node = Node[StateT](name=name, fn=fn, metadata=metadata)
+            node = Node[StateT](name=name, fn=fn, retry=retry, timeout=timeout, metadata=metadata)
         self._nodes[name] = node
         logger.debug("add_node(%r): kind=%s", name, node.kind.value)
         return self
@@ -151,6 +156,20 @@ class Graph(Generic[StateT]):
         logger.debug("add_fanout: %r -> %s (join=%r)", source, targets, join)
         return self
 
+    def add_error_edge(
+        self,
+        source: NodeName,
+        fallback: NodeName,
+    ) -> Graph[StateT]:
+        """Add an error-handling edge from *source* to *fallback*.
+
+        If *source* raises an exception during execution, the graph will
+        route to *fallback* instead of propagating the error.
+        """
+        self._error_edges.append(ErrorEdge(source=source, fallback=fallback))
+        logger.debug("add_error_edge: %r -> %r", source, fallback)
+        return self
+
     # -- entry / finish points --------------------------------------------
 
     def set_entry_point(self, name: NodeName) -> Graph[StateT]:
@@ -171,6 +190,8 @@ class Graph(Generic[StateT]):
     def compile(
         self,
         *,
+        input_map: Optional[Dict[str, str]] = None,
+        output_map: Optional[Dict[str, str]] = None,
         checkpointer: Optional["Checkpointer"] = None,
         name: Optional[str] = None,
         state_type: Optional[type] = None,
@@ -185,8 +206,11 @@ class Graph(Generic[StateT]):
             direct_edges=list(self._direct_edges),
             conditional_edges=list(self._conditional_edges),
             fanout_edges=list(self._fanout_edges),
+            error_edges=list(self._error_edges),
             entry_point=self._entry_point,
             finish_points=set(self._finish_points),
+            input_map=input_map,
+            output_map=output_map,
             checkpointer=checkpointer,
             name=name or "unnamed",
             metadata=dict(self._metadata),
@@ -252,6 +276,10 @@ class CompiledGraph(Generic[StateT]):
         "_name", "_metadata",
         "_state_type",
         "_successors", "_conditionals", "_fanout_map",
+        "_error_map",
+        "_error_edges",
+        "_input_map",
+        "_output_map",
     )
 
     def __init__(
@@ -261,6 +289,9 @@ class CompiledGraph(Generic[StateT]):
         direct_edges: List[DirectEdge[StateT]],
         conditional_edges: List[ConditionalEdge[StateT]],
         fanout_edges: Optional[List[FanOutEdge[StateT]]] = None,
+        input_map: Optional[Dict[str, str]] = None,
+        output_map: Optional[Dict[str, str]] = None,
+        error_edges: Optional[List[ErrorEdge[StateT]]] = None,
         entry_point: NodeName,
         finish_points: Set[NodeName],
         checkpointer: Optional["Checkpointer"] = None,
@@ -275,6 +306,9 @@ class CompiledGraph(Generic[StateT]):
         self._finish_points = finish_points
         self._checkpointer = checkpointer
         self._name = name
+        self._error_edges = error_edges or []
+        self._input_map = input_map or {}
+        self._output_map = output_map or {}
         self._metadata = metadata or {}
         self._state_type = state_type
 
@@ -292,6 +326,11 @@ class CompiledGraph(Generic[StateT]):
 
         for edge in conditional_edges:
             self._conditionals[edge.source] = edge
+
+        # Build error-edge lookup
+        self._error_map: Dict[NodeName, NodeName] = {}
+        for edge in self._error_edges:
+            self._error_map[edge.source] = edge.fallback
 
         # Build fan-out lookup
         self._fanout_map: Dict[NodeName, FanOutEdge[StateT]] = {}
@@ -324,6 +363,18 @@ class CompiledGraph(Generic[StateT]):
     @property
     def checkpointer(self) -> Optional["Checkpointer"]:
         return self._checkpointer
+
+    @property
+    def error_map(self) -> Dict[NodeName, NodeName]:
+        return dict(self._error_map)
+
+    @property
+    def input_map(self) -> Dict[str, str]:
+        return dict(self._input_map)
+
+    @property
+    def output_map(self) -> Dict[str, str]:
+        return dict(self._output_map)
 
     @property
     def state_type(self) -> Optional[type]:

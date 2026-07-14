@@ -68,11 +68,15 @@ class Node(Generic[StateT]):
         Unique node identifier within the graph.
     fn:
         The callable that implements the node's logic.
+    retry:
+        Number of retry attempts on failure (default: 0 = no retry).
+    timeout:
+        Maximum execution time in seconds (default: None = no timeout).
     metadata:
         Optional arbitrary metadata (tags, version, etc.).
     """
 
-    __slots__ = ("_name", "_fn", "_kind", "_metadata")
+    __slots__ = ("_name", "_fn", "_kind", "_retry", "_timeout", "_metadata")
 
     def __init__(
         self,
@@ -85,11 +89,16 @@ class Node(Generic[StateT]):
             "CompiledGraph[StateT]",
             "Pipeline[StateT]",
         ],
+        *,
+        retry: int = 0,
+        timeout: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         self._name = name
         self._fn = fn
         self._kind = _classify(fn)
+        self._retry = retry
+        self._timeout = timeout
         self._metadata = metadata or {}
         logger.debug("Node %r: kind=%s", name, self._kind.value)
 
@@ -106,6 +115,14 @@ class Node(Generic[StateT]):
     @property
     def metadata(self) -> Dict[str, Any]:
         return dict(self._metadata)
+
+    @property
+    def retry(self) -> int:
+        return self._retry
+
+    @property
+    def timeout(self) -> Optional[float]:
+        return self._timeout
 
     # -- invocation ---------------------------------------------------------
 
@@ -164,9 +181,36 @@ class Node(Generic[StateT]):
         if not isinstance(compiled, CompiledGraph):
             raise TypeError(f"Node '{self._name}' is not a CompiledGraph.")
         logger.debug("Node._run_subgraph(%r)", self._name)
+
+        # Apply input_map: create subgraph state from parent fields
+        if compiled.input_map:
+            kw = {}
+            for parent_field, sub_field in compiled.input_map.items():
+                kw[sub_field] = getattr(state, parent_field, None)
+            sub_type = compiled.state_type
+            if sub_type is not None:
+                if hasattr(sub_type, "model_validate"):
+                    state = sub_type.model_validate(kw)
+                else:
+                    state = sub_type(**kw)
+            elif hasattr(state, "apply"):
+                state = state.apply(**kw)
+            else:
+                for k, v in kw.items():
+                    setattr(state, k, v)
+
         # Isolate subgraph checkpoints
         config = {"thread_id": f"sg:{self._name}"}
         result = compiled.invoke(state, config=config)
+
+        # Apply output_map: copy subgraph result fields to parent update
+        if compiled.output_map:
+            result_dict = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+            mapped: Dict[str, Any] = {}
+            for sub_field, parent_field in compiled.output_map.items():
+                mapped[parent_field] = result_dict.get(sub_field)
+            return mapped
+
         if hasattr(result, "model_dump"):
             return result.model_dump()
         return dict(result)
@@ -178,9 +222,36 @@ class Node(Generic[StateT]):
         if not isinstance(compiled, CompiledGraph):
             raise TypeError(f"Node '{self._name}' is not a CompiledGraph.")
         logger.debug("Node._arun_subgraph(%r)", self._name)
+
+        # Apply input_map: create subgraph state from parent fields
+        if compiled.input_map:
+            kw = {}
+            for parent_field, sub_field in compiled.input_map.items():
+                kw[sub_field] = getattr(state, parent_field, None)
+            sub_type = compiled.state_type
+            if sub_type is not None:
+                if hasattr(sub_type, "model_validate"):
+                    state = sub_type.model_validate(kw)
+                else:
+                    state = sub_type(**kw)
+            elif hasattr(state, "apply"):
+                state = state.apply(**kw)
+            else:
+                for k, v in kw.items():
+                    setattr(state, k, v)
+
         # Isolate subgraph checkpoints
         config = {"thread_id": f"sg:{self._name}"}
         result = await compiled.ainvoke(state, config=config)
+
+        # Apply output_map
+        if compiled.output_map:
+            result_dict = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+            mapped: Dict[str, Any] = {}
+            for sub_field, parent_field in compiled.output_map.items():
+                mapped[parent_field] = result_dict.get(sub_field)
+            return mapped
+
         if hasattr(result, "model_dump"):
             return result.model_dump()
         return dict(result)
