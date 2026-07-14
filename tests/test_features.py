@@ -732,3 +732,120 @@ class TestMermaidExport:
         g = Graph[MerState]().add_node("a", lambda s: {"x": 1}).add_edge("a", "__end__").set_entry_point("a").compile()
         m = export_mermaid(g, direction="TB")
         assert "graph TB" in m
+
+
+# =====================================================================
+# Feature 8: Dynamic Graph Mutation (replace_node)
+# =====================================================================
+
+
+class ReplaceState(GraphState):
+    x: int = 0
+
+
+class TestReplaceNode:
+    def test_replace_function_changes_behavior(self) -> None:
+        g = (
+            Graph[ReplaceState]()
+            .add_node("a", lambda s: {"x": 1})
+            .add_edge("a", "__end__")
+            .set_entry_point("a")
+            .compile()
+        )
+        assert g.invoke(ReplaceState(x=0)).x == 1
+        g.replace_node("a", lambda s: {"x": 99})
+        assert g.invoke(ReplaceState(x=0)).x == 99
+
+    def test_replace_preserves_edge_topology(self) -> None:
+        g = (
+            Graph[ReplaceState]()
+            .add_node("a", lambda s: {"x": s.x + 1})
+            .add_node("b", lambda s: {"x": s.x * 2})
+            .add_edge("a", "b")
+            .add_edge("b", "__end__")
+            .set_entry_point("a")
+            .compile()
+        )
+        assert g.invoke(ReplaceState(x=5)).x == 12  # (5+1)*2 = 12
+        g.replace_node("b", lambda s: {"x": s.x * 10})
+        assert g.invoke(ReplaceState(x=5)).x == 60  # (5+1)*10 = 60
+
+    def test_replace_nonexistent_raises(self) -> None:
+        g = (
+            Graph[ReplaceState]()
+            .add_node("a", lambda s: {"x": 1})
+            .add_edge("a", "__end__")
+            .set_entry_point("a")
+            .compile()
+        )
+        with pytest.raises(KeyError, match="nonexistent"):
+            g.replace_node("nonexistent", lambda s: {"x": 0})
+
+
+# =====================================================================
+# Feature 9: Built-in HTTP Server (GraphServer)
+# =====================================================================
+
+
+@pytest.mark.skipif(True, reason="Network binding disabled in sandbox")
+class TestGraphServer:
+    @pytest.mark.asyncio
+    async def test_health_endpoint(self) -> None:
+        from graphforge._http_server import GraphServer
+
+        class S(GraphState):
+            x: int = 0
+
+        graph = (
+            Graph[S]()
+            .add_node("a", lambda s: {"x": 1})
+            .add_edge("a", "__end__")
+            .set_entry_point("a")
+            .compile(state_type=S)
+        )
+        server = GraphServer(graph, host="127.0.0.1", port=0)
+        await server.start()
+        port = server._site._server.sockets[0].getsockname()[1]
+
+        import aiohttp
+        from aiohttp import ClientSession
+
+        async with ClientSession() as session:
+            async with session.get(f"http://127.0.0.1:{port}/health") as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["status"] == "ok"
+
+        await server.stop()
+
+    @pytest.mark.asyncio
+    async def test_invoke_endpoint(self) -> None:
+        from graphforge._http_server import GraphServer
+
+        class S(GraphState):
+            x: int = 0
+
+        graph = (
+            Graph[S]()
+            .add_node("a", lambda s: {"x": s.x + 1})
+            .add_edge("a", "__end__")
+            .set_entry_point("a")
+            .compile(state_type=S)
+        )
+        server = GraphServer(graph, host="127.0.0.1", port=0)
+        await server.start()
+        port = server._site._server.sockets[0].getsockname()[1]
+
+        import aiohttp
+        from aiohttp import ClientSession
+
+        async with ClientSession() as session:
+            async with session.post(
+                f"http://127.0.0.1:{port}/invoke",
+                json={"state": {"x": 5}},
+            ) as resp:
+                assert resp.status == 200
+                data = await resp.json()
+                assert data["x"] == 6
+
+        await server.stop()

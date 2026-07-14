@@ -30,6 +30,7 @@ from graphforge._checkpoint_redis import RedisCheckpointer
 from graphforge._command import Command
 from graphforge._interrupt import interrupt
 from graphforge._mermaid import export_mermaid
+from graphforge._http_server import GraphServer
 from graphforge._callbacks import Callback, CallbackManager
 from graphforge._edge import ErrorEdge, FanOutEdge
 from graphforge._executor import GraphExecutionPaused
@@ -69,6 +70,7 @@ __all__ = [
     "Command",
     "interrupt",
     "export_mermaid",
+    "GraphServer",
     "ErrorEdge",
     "FanOutEdge",
     # Visualise

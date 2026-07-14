@@ -497,6 +497,25 @@ class CompiledGraph(Generic[StateT]):
             raise KeyError(f"Node {name!r} not found in graph {self._name!r}.")
         return self._nodes[name]
 
+    def replace_node(
+        self,
+        name: NodeName,
+        fn: Any,
+        *,
+        retry: int = 0,
+        timeout: Optional[float] = None,
+    ) -> None:
+        """Replace a node's function at runtime without recompiling."""
+        if name not in self._nodes:
+            raise KeyError(f"Node {name!r} not found in graph {self._name!r}.")
+        old_node = self._nodes[name]
+        new_node = Node[StateT](
+            name=name, fn=fn, retry=retry, timeout=timeout,
+            metadata=old_node.metadata,
+        )
+        self._nodes[name] = new_node
+        logger.debug("replace_node(%r): function replaced", name)
+
     def successors(self, node_name: NodeName) -> Sequence[Optional[NodeName]]:
         return list(self._successors.get(node_name, []))
 
