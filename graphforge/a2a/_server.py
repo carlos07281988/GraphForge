@@ -267,7 +267,8 @@ class A2AServer:
             id=task_id,
             status=TaskStatus.WORKING,
             messages=[req.message],
-            metadata=req.metadata,
+            metadata={**req.metadata, "_push_url": req.push_notification.url}
+                   if req.push_notification else req.metadata,
         )
         await self._task_store.add(task)
 
@@ -296,6 +297,8 @@ class A2AServer:
                 status_changed_at=now,
             )
 
+        # Send push notification if configured
+        await self._send_push(task)
         return web.json_response(
             TaskSendResponse(task=task).model_dump(mode="json", by_alias=True),
             status=200,
@@ -318,7 +321,8 @@ class A2AServer:
             id=task_id,
             status=TaskStatus.WORKING,
             messages=[req.message],
-            metadata=req.metadata,
+            metadata={**req.metadata, "_push_url": req.push_notification.url}
+                   if req.push_notification else req.metadata,
         )
         await self._task_store.add(task)
 
@@ -482,6 +486,7 @@ class A2AServer:
         task = await self._task_store.update(
             task_id, status=TaskStatus.CANCELED, status_changed_at=now,
         )
+        await self._send_push(task)
         return web.json_response(
             TaskCancelResponse(
                 id=task_id, status=TaskStatus.CANCELED,
@@ -492,6 +497,23 @@ class A2AServer:
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    # ── Push notification helper ─────────────────────────────────────────
+
+    async def _send_push(self, task: Task) -> None:
+        push_url = task.metadata.get("_push_url")
+        if not push_url:
+            return
+        try:
+            payload = task.model_dump(mode="json", by_alias=True)
+            async with aiohttp.ClientSession() as session:
+                await session.post(
+                    push_url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=5),
+                )
+        except Exception as exc:
+            _logger.warning("Push notification to %s failed: %s", push_url, exc)
 
     def _build_state(self, message: Message) -> _StateT:
         """Convert an A2A message to a GraphState instance."""

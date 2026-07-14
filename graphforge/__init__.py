@@ -31,6 +31,7 @@ from graphforge._command import Command
 from graphforge._interrupt import interrupt
 from graphforge._mermaid import export_mermaid
 from graphforge._http_server import GraphServer
+from graphforge._webhook import WebhookCallback
 from graphforge._callbacks import Callback, CallbackManager
 from graphforge._edge import ErrorEdge, FanOutEdge
 from graphforge._executor import GraphExecutionPaused
@@ -71,6 +72,7 @@ __all__ = [
     "interrupt",
     "export_mermaid",
     "GraphServer",
+    "WebhookCallback",
     "ErrorEdge",
     "FanOutEdge",
     # Visualise

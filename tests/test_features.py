@@ -849,3 +849,62 @@ class TestGraphServer:
                 assert data["x"] == 6
 
         await server.stop()
+
+
+# =====================================================================
+# Feature 10: Event-driven Webhooks (WebhookCallback)
+# =====================================================================
+
+
+class TestWebhookCallback:
+    def test_sends_event_with_correct_payload(self) -> None:
+        from graphforge._webhook import WebhookCallback
+        from unittest.mock import patch
+        from urllib.request import Request
+
+        mock = patch("graphforge._webhook.urlopen").start()
+        cb = WebhookCallback("http://hook.example.com/events")
+        cb.on_graph_start("my_graph", {})
+
+        req: Request = mock.call_args[0][0]
+        assert req.full_url == "http://hook.example.com/events"
+        assert req.method == "POST"
+        import json
+        payload = json.loads(req.data)
+        assert payload["event"] == "graph_start"
+        assert payload["data"]["graph"] == "my_graph"
+        mock.stop()
+
+    def test_filters_events(self) -> None:
+        from graphforge._webhook import WebhookCallback
+        from unittest.mock import patch
+
+        mock = patch("graphforge._webhook.urlopen").start()
+        cb = WebhookCallback("http://hook.example.com", events=["graph_end"])
+        cb.on_graph_start("g", {})
+        cb.on_graph_end("g", {})
+        assert mock.call_count == 1  # Only graph_end sent
+        mock.stop()
+
+    def test_auth_header(self) -> None:
+        from graphforge._webhook import WebhookCallback
+        from unittest.mock import patch
+
+        mock = patch("graphforge._webhook.urlopen").start()
+        cb = WebhookCallback("http://hook.example.com", api_key="sk-test")
+        cb.on_graph_start("g", {})
+        req = mock.call_args[0][0]
+        assert req.headers.get("Authorization") == "Bearer sk-test"
+        mock.stop()
+
+    def test_multiple_events(self) -> None:
+        from graphforge._webhook import WebhookCallback
+        from unittest.mock import patch
+
+        mock = patch("graphforge._webhook.urlopen").start()
+        cb = WebhookCallback("http://hook.example.com")
+        cb.on_graph_start("g", {})
+        cb.on_node_start("a", {})
+        cb.on_node_end("a", {})
+        assert mock.call_count == 3
+        mock.stop()
