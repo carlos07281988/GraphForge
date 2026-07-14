@@ -908,3 +908,81 @@ class TestWebhookCallback:
         cb.on_node_end("a", {})
         assert mock.call_count == 3
         mock.stop()
+
+
+# =====================================================================
+# Feature 11: OpenTelemetry Tracing
+# =====================================================================
+
+
+class TestTracingCallback:
+    def test_creates_graph_span(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from graphforge._tracing import TracingCallback
+
+        with patch("graphforge._tracing._HAS_OTEL", True), patch("graphforge._tracing.trace") as mock_trace:
+            tracer = MagicMock()
+            mock_trace.get_tracer.return_value = tracer
+            cb = TracingCallback()
+            cb.on_graph_start("test_graph", {})
+            tracer.start_span.assert_called_with("graph.test_graph")
+            tracer.start_span.return_value.end.assert_not_called()
+
+    def test_creates_node_span(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from graphforge._tracing import TracingCallback
+
+        with patch("graphforge._tracing._HAS_OTEL", True), patch("graphforge._tracing.trace") as mock_trace:
+            tracer = MagicMock()
+            mock_trace.get_tracer.return_value = tracer
+            cb = TracingCallback()
+            cb.on_node_start("processor", {})
+            tracer.start_span.assert_called_with("node.processor")
+
+    def test_ends_node_span(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from graphforge._tracing import TracingCallback
+
+        with patch("graphforge._tracing._HAS_OTEL", True), patch("graphforge._tracing.trace") as mock_trace:
+            tracer = MagicMock()
+            mock_trace.get_tracer.return_value = tracer
+            cb = TracingCallback()
+            cb.on_node_start("a", {})
+            span = tracer.start_span.return_value
+            cb.on_node_end("a", {})
+            span.end.assert_called_once()
+
+    def test_records_exception_on_error(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from graphforge._tracing import TracingCallback
+
+        with patch("graphforge._tracing._HAS_OTEL", True), patch("graphforge._tracing.trace") as mock_trace:
+            tracer = MagicMock()
+            mock_trace.get_tracer.return_value = tracer
+            cb = TracingCallback()
+            cb.on_node_start("a", {})
+            span = tracer.start_span.return_value
+            cb.on_node_error("a", ValueError("boom"))
+            span.record_exception.assert_called_once()
+
+    def test_raises_without_opentelemetry(self) -> None:
+        from unittest.mock import patch
+        from graphforge._tracing import TracingCallback
+
+        with patch("graphforge._tracing._HAS_OTEL", False):
+            import pytest
+            with pytest.raises(ImportError, match="OpenTelemetry"):
+                TracingCallback()
+
+    def test_ends_graph_span(self) -> None:
+        from unittest.mock import MagicMock, patch
+        from graphforge._tracing import TracingCallback
+
+        with patch("graphforge._tracing._HAS_OTEL", True), patch("graphforge._tracing.trace") as mock_trace:
+            tracer = MagicMock()
+            mock_trace.get_tracer.return_value = tracer
+            cb = TracingCallback()
+            cb.on_graph_start("g", {})
+            span = tracer.start_span.return_value
+            cb.on_graph_end("g", {})
+            span.end.assert_called_once()

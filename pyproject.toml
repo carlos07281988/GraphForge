@@ -30,6 +30,7 @@ dependencies = [
 
 [project.optional-dependencies]
 a2a = ["aiohttp>=3.9"]
+tracing = ["opentelemetry-api>=1.20"]
 
 [project.urls]
 Homepage = "https://github.com/carlos07281988/GraphForge"
