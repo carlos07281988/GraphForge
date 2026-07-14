@@ -693,11 +693,11 @@ render_graph(compiled, "graph.png")
 - [x] 节点级重试与错误回退 — retry=N, add_error_edge()
 - [x] 子图 I/O 映射 — input_map/output_map 父子边界声明
 - [x] 智能体模块 — ToolNode、has_tool_calls()、create_react_agent()
+- [x] 图序列化 — serialize()/deserialize() JSON/YAML 导出/导入
 
 ### 未来工作
 
-- 图序列化（JSON/YAML 导入/导出）
-- A2A 推送通知（基于 Webhook 的任务更新）
+- A2A 推送通知（基于 Webhook 的任务更新）（基于 Webhook 的任务更新）
 - OpenTelemetry 追踪（节点级可观测性）
 - 人机协同模式（审批节点、中断/恢复）
 - 分布式执行（Dask/Ray 集成）

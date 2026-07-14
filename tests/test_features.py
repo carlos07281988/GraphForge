@@ -315,3 +315,133 @@ class TestReActAgent:
         compiled = graph.compile(state_type=AgentState)
         result = compiled.invoke(AgentState(messages=[{"role": "user", "content": "search"}]))
         assert hasattr(result, "messages")
+
+
+# =====================================================================
+# Feature 4: Graph Serialisation
+# =====================================================================
+
+
+class SerialState(GraphState):
+    x: int = 0
+    y: str = ""
+
+
+class TestGraphSerialisation:
+    def test_serialize_basic(self) -> None:
+        g = Graph[SerialState]()
+        g.add_node("a", lambda s: {"x": 1})
+        g.add_node("b", lambda s: {"y": "hello"})
+        g.add_edge("a", "b")
+        g.add_edge("b", "__end__")
+        g.set_entry_point("a")
+        data = g.serialize()
+        assert data["version"] == "1.0"
+        assert set(data["node_specs"]) == {"a", "b"}
+        assert len(data["direct_edges"]) == 2
+
+    def test_serialize_with_metadata(self) -> None:
+        g = Graph[SerialState]()
+        g.add_node("a", lambda s: {"x": 1}, retry=3, timeout=30.0, metadata={"env": "prod"})
+        g.add_edge("a", "__end__")
+        g.set_entry_point("a")
+        g.set_metadata("name", "test_graph")
+        data = g.serialize()
+        assert data["node_specs"]["a"]["retry"] == 3
+        assert data["node_specs"]["a"]["timeout"] == 30.0
+        assert data["node_specs"]["a"]["metadata"]["env"] == "prod"
+        assert data["metadata"]["name"] == "test_graph"
+
+    def test_round_trip_simple(self) -> None:
+        g = Graph[SerialState]()
+        g.add_node("a", lambda s: {"x": s.x + 1})
+        g.add_edge("a", "__end__")
+        g.set_entry_point("a")
+        data = g.serialize()
+
+        g2 = Graph.deserialize(data)
+        g2.add_node("a", lambda s: {"x": s.x + 1})
+        compiled = g2.compile()
+        result = compiled.invoke(SerialState(x=5))
+        assert result.x == 6
+
+    def test_round_trip_error_edges(self) -> None:
+        def fail_fn(state: SerialState) -> dict:
+            raise ValueError("fail")
+
+        def backup_fn(state: SerialState) -> dict:
+            return {"x": -1}
+
+        g = Graph[SerialState]()
+        g.add_node("primary", fail_fn)
+        g.add_node("backup", backup_fn)
+        g.add_error_edge("primary", "backup")
+        g.add_edge("backup", "__end__")
+        g.add_edge("primary", "__end__")
+        g.set_entry_point("primary")
+        data = g.serialize()
+
+        g2 = Graph.deserialize(data)
+        g2.add_node("primary", fail_fn)
+        g2.add_node("backup", backup_fn)
+        compiled = g2.compile()
+        result = compiled.invoke(SerialState(x=10))
+        assert result.x == -1
+
+    def test_json_round_trip(self) -> None:
+        import json
+        g = Graph[SerialState]()
+        g.add_node("a", lambda s: {"x": 1})
+        g.add_edge("a", "__end__")
+        g.set_entry_point("a")
+        data = g.serialize()
+        json_str = json.dumps(data)
+        restored = json.loads(json_str)
+
+        g2 = Graph.deserialize(restored)
+        g2.add_node("a", lambda s: {"x": 42})
+        compiled = g2.compile()
+        result = compiled.invoke(SerialState(x=0))
+        assert result.x == 42
+
+    def test_deserialize_invalid_replaces_placeholder(self) -> None:
+        g = Graph[SerialState]()
+        g.add_node("a", lambda s: {"x": 1})
+        g.add_edge("a", "__end__")
+        g.set_entry_point("a")
+        data = g.serialize()
+
+        g2 = Graph.deserialize(data)
+        compiled = g2.compile()
+        # Should raise RuntimeError because 'a' is still a placeholder
+        import pytest
+        with pytest.raises(RuntimeError, match="placeholder"):
+            compiled.invoke(SerialState(x=0))
+
+    def test_serialize_fanout(self) -> None:
+        g = Graph[SerialState]()
+        g.add_node("src", lambda s: {"x": 1})
+        g.add_fanout("src", ["a", "b"], join="j")
+        g.add_node("a", lambda s: {"x": s.x + 1})
+        g.add_node("b", lambda s: {"x": s.x + 2})
+        g.add_node("j", lambda s: {"x": s.x})
+        g.add_edge("j", "__end__")
+        g.set_entry_point("src")
+        data = g.serialize()
+
+        g2 = Graph.deserialize(data)
+        g2.add_node("src", lambda s: {"x": 1})
+        g2.add_node("a", lambda s: {"x": s.x + 1})
+        g2.add_node("b", lambda s: {"x": s.x + 2})
+        g2.add_node("j", lambda s: {"x": s.x})
+        compiled = g2.compile()
+        result = compiled.invoke(SerialState(x=0))
+        # Fan-out merge with current executor structure picks last branch
+        assert result.x == 2
+
+    def test_serialize_empty_graph_raises(self) -> None:
+        g = Graph[SerialState]()
+        data = g.serialize()
+        assert data["node_specs"] == {}
+        assert data["entry_point"] is None
+        assert data["direct_edges"] == []

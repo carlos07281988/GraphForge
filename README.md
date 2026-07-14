@@ -850,11 +850,11 @@ A detailed record of all improvements is maintained in [](docs/improvements.md).
 - [x] Node-level retry & error fallback — retry=N, add_error_edge()
 - [x] Subgraph I/O mapping — input_map/output_map for clean parent/child boundaries
 - [x] Agents module — ToolNode, has_tool_calls(), create_react_agent()
+- [x] Graph serialisation — serialize()/deserialize() for JSON/YAML export/import
 
 ### Future Work
 
- - Graph serialisation (export/import graphs as JSON or YAML)
- - A2A push notifications (webhook-based task updates)
+ - A2A push notifications (webhook-based task updates) (webhook-based task updates)
  - OpenTelemetry tracing for node-level observability
  - Human-in-the-loop patterns (approval nodes, interrupt/resume)
  - Distributed execution (Dask/Ray integration)

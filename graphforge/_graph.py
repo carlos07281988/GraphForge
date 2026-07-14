@@ -50,6 +50,17 @@ if TYPE_CHECKING:
 logger = get_logger("graph")
 
 
+# ── Placeholder for deserialised nodes ────────────────────────────────
+
+
+def _placeholder_fn(state: Any) -> Dict[str, Any]:
+    """Placeholder for deserialised nodes that need a real function."""
+    raise RuntimeError(
+        "This node is a placeholder from deserialize(). "
+        "Replace it with a real function using graph.add_node(name, fn)."
+    )
+
+
 # ===================================================================
 # Graph — mutable builder
 # ===================================================================
@@ -102,7 +113,7 @@ class Graph(Generic[StateT]):
         timeout: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Graph[StateT]:
-        if name in self._nodes:
+        if name in self._nodes and self._nodes[name]._fn is not _placeholder_fn:
             raise ValueError(
                 f"A node named {name!r} is already registered."
             )
@@ -184,6 +195,102 @@ class Graph(Generic[StateT]):
     def set_metadata(self, key: str, value: Any) -> Graph[StateT]:
         self._metadata[key] = value
         return self
+
+
+    # -- serialisation -------------------------------------------------------
+
+    def serialize(self) -> Dict[str, Any]:
+        """Serialize the graph topology (node names, edges, metadata) to a dict.
+
+        Node function bodies are **not** serialised.  After deserialising you
+        must re-register real functions with :meth:`add_node` and re-register
+        conditional-edge routers with :meth:`add_conditional_edges`.
+        """
+        return {
+            "version": "1.0",
+            "node_specs": {
+                name: {
+                    "retry": node.retry,
+                    "timeout": node.timeout,
+                    "metadata": node.metadata,
+                }
+                for name, node in self._nodes.items()
+            },
+            "direct_edges": [
+                {"source": e.source, "target": e.target}
+                for e in self._direct_edges
+            ],
+            "conditional_edges": [
+                {"source": e.source, "paths": dict(e.path_map)}
+                for e in self._conditional_edges
+            ],
+            "fanout_edges": [
+                {"source": e.source, "targets": list(e.targets), "join": e.join}
+                for e in self._fanout_edges
+            ],
+            "error_edges": [
+                {"source": e.source, "fallback": e.fallback}
+                for e in self._error_edges
+            ],
+            "entry_point": self._entry_point,
+            "finish_points": list(self._finish_points),
+            "metadata": dict(self._metadata),
+        }
+
+    @classmethod
+    def deserialize(cls, data: Dict[str, Any]) -> "Graph[StateT]":
+        """Create a :class:`Graph` builder from serialised topology data.
+
+        Node functions and conditional-edge routers are **not** restored ---
+        replace them with :meth:`add_node` and :meth:`add_conditional_edges`
+        before calling :meth:`compile`.
+
+        Parameters
+        ----------
+        data:
+            A dict previously returned by :meth:`serialize`.
+
+        Returns
+        -------
+        A :class:`Graph` builder with placeholder node functions.
+        """
+        graph: Graph[StateT] = cls()
+
+        for name, spec in data.get("node_specs", {}).items():
+            graph.add_node(
+                name,
+                _placeholder_fn,
+                retry=spec.get("retry", 0),
+                timeout=spec.get("timeout"),
+                metadata=spec.get("metadata"),
+            )
+
+        for e in data.get("direct_edges", []):
+            graph.add_edge(e["source"], e["target"])
+
+        for e in data.get("conditional_edges", []):
+            graph.add_conditional_edges(
+                e["source"], _placeholder_fn, e["paths"],
+            )
+
+        for e in data.get("fanout_edges", []):
+            graph.add_fanout(
+                e["source"], e["targets"], join=e.get("join"),
+            )
+
+        for e in data.get("error_edges", []):
+            graph.add_error_edge(e["source"], e["fallback"])
+
+        if data.get("entry_point"):
+            graph.set_entry_point(data["entry_point"])
+
+        for fp in data.get("finish_points", []):
+            graph.set_finish_point(fp)
+
+        for k, v in data.get("metadata", {}).items():
+            graph.set_metadata(k, v)
+
+        return graph
 
     # -- compilation ------------------------------------------------------
 

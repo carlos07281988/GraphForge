@@ -95,6 +95,34 @@ graph = create_react_agent(llm_func, tools=tools)
 
 **Tests**: 6 tests (ToolNode×4, ReAct×2)
 
+
+## 2026-07-14 — Graph Serialisation
+
+**What**: Export and import graph topology as JSON/YAML.
+
+**Changes**:
+- `_graph.py` — `Graph.serialize()` and `Graph.deserialize()` class method
+- `_node.py` — Added `Node.fn` property for introspection
+
+**Usage**:
+```python
+from graphforge import Graph
+
+# Export
+data = graph.serialize()
+import json
+json.dump(data, open("graph.json", "w"))
+
+# Import
+from graphforge import Graph
+g2 = Graph.deserialize(json.load(open("graph.json")))
+g2.add_node("a", my_func)  # Replace placeholder
+compiled = g2.compile()
+```
+
+**Note**: Node function bodies are NOT serialised — they must be re-registered after deserialising.
+
+**Tests**: 8 tests (serialize, metadata, round-trip, error edges, JSON, fanout)
 ---
 
 ## 2026-07-14 — Roadmap Completion

@@ -124,6 +124,11 @@ class Node(Generic[StateT]):
     def timeout(self) -> Optional[float]:
         return self._timeout
 
+    @property
+    def fn(self) -> Any:
+        return self._fn
+
+
     # -- invocation ---------------------------------------------------------
 
     def invoke(self, state: StateT, **kwargs: Any) -> StateUpdate:
