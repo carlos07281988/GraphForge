@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Type
 
 from graphforge import Graph, GraphState, node_field
+from graphforge._types import END_SENTINEL
 from graphforge.agents._tool_node import ToolNode, ToolDef, has_tool_calls
 
 
@@ -67,7 +68,7 @@ def create_react_agent(
     graph.add_conditional_edges(
         agent_node_name,
         has_tool_calls,
-        {"tools": tools_node_name, "end": "__end__"},
+        {"tools": tools_node_name, "end": END_SENTINEL},
     )
 
     # After tools, go back to agent

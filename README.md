@@ -736,8 +736,7 @@ compiled.invoke(state, callbacks=manager)
 |---|---|
 | `DirectEdge(source, target)` | Unconditional edge |
 | `ConditionalEdge(source, router, path_map)` | Conditional edge with router function |
-| `ErrorEdge(source, fallback)` | Error-handling edge (fallback on failure) |
-| `FanOutEdge(source, targets, join=None)` | Parallel fan-out edge |
+| `FanOutEdge(source, targets, join)` | Parallel fan-out edge |
 
 ### `Pipeline[StateT]`
 
@@ -771,7 +770,7 @@ Pipeline,
 EventType, StreamEvent,
 Checkpoint, Checkpointer, CheckpointKey, InMemoryCheckpointer,
 SqliteCheckpointer, RedisCheckpointer,
-GraphExecutionPaused, ErrorEdge,
+GraphExecutionPaused,
 Callback, CallbackManager,
 configure_logging, get_logger,
 export_dot, render_graph,

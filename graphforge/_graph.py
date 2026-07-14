@@ -25,13 +25,15 @@ from typing import (
     Union,
 )
 
-from graphforge._edge import AnyEdge, ConditionalEdge, DirectEdge, ErrorEdge, FanOutEdge
+from graphforge._edge import AnyEdge, ConditionalEdge, DirectEdge, FanOutEdge
 from graphforge._logging import get_logger
 from graphforge._node import Node, NodeKind
 from graphforge._types import (
     AsyncNodeFunc,
     AsyncRouterFunc,
     AsyncStreamingNodeFunc,
+    ConfigDict,
+    END_SENTINEL,
     NodeFunc,
     NodeName,
     RouterFunc,
@@ -78,7 +80,7 @@ class Graph(Generic[StateT]):
         "_direct_edges",
         "_conditional_edges",
         "_fanout_edges",
-        "_error_edges",
+        "_error_map",
         "_entry_point",
         "_finish_points",
         "_metadata",
@@ -89,7 +91,7 @@ class Graph(Generic[StateT]):
         self._direct_edges: List[DirectEdge[StateT]] = []
         self._conditional_edges: List[ConditionalEdge[StateT]] = []
         self._fanout_edges: List[FanOutEdge[StateT]] = []
-        self._error_edges: List[ErrorEdge[StateT]] = []
+        self._error_map: Dict[NodeName, NodeName] = {}
         self._entry_point: Optional[NodeName] = None
         self._finish_points: Set[NodeName] = set()
         self._metadata: Dict[str, Any] = {}
@@ -177,7 +179,7 @@ class Graph(Generic[StateT]):
         If *source* raises an exception during execution, the graph will
         route to *fallback* instead of propagating the error.
         """
-        self._error_edges.append(ErrorEdge(source=source, fallback=fallback))
+        self._error_map[source] = fallback
         logger.debug("add_error_edge: %r -> %r", source, fallback)
         return self
 
@@ -229,8 +231,8 @@ class Graph(Generic[StateT]):
                 for e in self._fanout_edges
             ],
             "error_edges": [
-                {"source": e.source, "fallback": e.fallback}
-                for e in self._error_edges
+                {"source": source, "fallback": fallback}
+                for source, fallback in self._error_map.items()
             ],
             "entry_point": self._entry_point,
             "finish_points": list(self._finish_points),
@@ -313,7 +315,7 @@ class Graph(Generic[StateT]):
             direct_edges=list(self._direct_edges),
             conditional_edges=list(self._conditional_edges),
             fanout_edges=list(self._fanout_edges),
-            error_edges=list(self._error_edges),
+            error_edges=dict(self._error_map),
             entry_point=self._entry_point,
             finish_points=set(self._finish_points),
             input_map=input_map,
@@ -340,7 +342,7 @@ class Graph(Generic[StateT]):
                 raise ValueError(
                     f"Edge source {edge.source!r} is not registered."
                 )
-            if edge.target not in registered and edge.target != "__end__":
+            if edge.target not in registered and edge.target != END_SENTINEL:
                 raise ValueError(
                     f"Edge target {edge.target!r} is not registered."
                 )
@@ -351,7 +353,7 @@ class Graph(Generic[StateT]):
                     f"Fan-out source {edge.source!r} is not registered."
                 )
             for t in edge.targets:
-                if t not in registered and t != "__end__":
+                if t not in registered and t != END_SENTINEL:
                     raise ValueError(
                         f"Fan-out target {t!r} is not registered."
                     )
@@ -361,7 +363,7 @@ class Graph(Generic[StateT]):
                 raise ValueError(
                     f"Conditional edge source {edge.source!r} is not registered."
                 )
-            unknown = set(edge.path_map.values()) - registered - {"__end__"}
+            unknown = set(edge.path_map.values()) - registered - {END_SENTINEL}
             if unknown:
                 raise ValueError(
                     f"Conditional edge targets {unknown} are not registered."
@@ -384,7 +386,6 @@ class CompiledGraph(Generic[StateT]):
         "_state_type",
         "_successors", "_conditionals", "_fanout_map",
         "_error_map",
-        "_error_edges",
         "_input_map",
         "_output_map",
     )
@@ -396,9 +397,9 @@ class CompiledGraph(Generic[StateT]):
         direct_edges: List[DirectEdge[StateT]],
         conditional_edges: List[ConditionalEdge[StateT]],
         fanout_edges: Optional[List[FanOutEdge[StateT]]] = None,
+        error_edges: Optional[Dict[NodeName, NodeName]] = None,
         input_map: Optional[Dict[str, str]] = None,
         output_map: Optional[Dict[str, str]] = None,
-        error_edges: Optional[List[ErrorEdge[StateT]]] = None,
         entry_point: NodeName,
         finish_points: Set[NodeName],
         checkpointer: Optional["Checkpointer"] = None,
@@ -413,7 +414,6 @@ class CompiledGraph(Generic[StateT]):
         self._finish_points = finish_points
         self._checkpointer = checkpointer
         self._name = name
-        self._error_edges = error_edges or []
         self._input_map = input_map or {}
         self._output_map = output_map or {}
         self._metadata = metadata or {}
@@ -427,22 +427,21 @@ class CompiledGraph(Generic[StateT]):
 
         for edge in direct_edges:
             target: Optional[NodeName] = (
-                None if edge.target == "__end__" else edge.target
+                None if edge.target == END_SENTINEL else edge.target
             )
             self._successors.setdefault(edge.source, []).append(target)
 
         for edge in conditional_edges:
             self._conditionals[edge.source] = edge
 
-        # Build error-edge lookup
-        self._error_map: Dict[NodeName, NodeName] = {}
-        for edge in self._error_edges:
-            self._error_map[edge.source] = edge.fallback
-
         # Build fan-out lookup
         self._fanout_map: Dict[NodeName, FanOutEdge[StateT]] = {}
         for edge in (fanout_edges or []):
             self._fanout_map[edge.source] = edge
+
+        # Build error-edge lookup
+        self._error_map: Dict[NodeName, NodeName] = {}
+        self._error_map.update(error_edges or {})
 
         logger.debug(
             "CompiledGraph %r: %d nodes, %d direct edges, %d conditional edges",

@@ -140,36 +140,10 @@ class FanOutEdge(Generic[StateT]):
 AnyEdge = Union[DirectEdge[StateT], ConditionalEdge[StateT], FanOutEdge[StateT]]
 
 
-class ErrorEdge(Generic[StateT]):
-    """An edge taken when a node raises an exception.
-
-    When *source* raises an unhandled exception, execution routes to
-    *fallback* instead of propagating the error.
-
-    Parameters
-    ----------
-    source:
-        The source node name that may fail.
-    fallback:
-        The fallback node to execute on failure.
-    """
-
-    __slots__ = ("source", "fallback")
-
-    def __init__(self, source: NodeName, fallback: NodeName) -> None:
-        assert source, "source must be a non-empty string"
-        assert fallback, "fallback must be a non-empty string"
-        self.source = source
-        self.fallback = fallback
-
-    def __repr__(self) -> str:
-        return f"ErrorEdge({self.source!r} -> {self.fallback!r})"
-
-
 __all__ = [
     "ConditionalEdge",
     "DirectEdge",
     "EdgeKind",
-    "ErrorEdge",
     "FanOutEdge",
+    "AnyEdge",
 ]

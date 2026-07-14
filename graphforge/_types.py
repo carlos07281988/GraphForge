@@ -75,6 +75,13 @@ RouterFunc = Callable[..., NodeName]
 AsyncRouterFunc = Callable[..., Awaitable[NodeName]]
 
 # ---------------------------------------------------------------------------
+# Sentinel values
+# ---------------------------------------------------------------------------
+
+#: Sentinel string used to indicate graph exit (the "end" pseudo-node).
+END_SENTINEL: str = "__end__"
+
+# ---------------------------------------------------------------------------
 # Runtime-checkable Protocols
 # ---------------------------------------------------------------------------
 
@@ -110,6 +117,7 @@ __all__: list[str] = [
     "NodeName",
     "StateUpdate",
     "ConfigDict",
+    "END_SENTINEL",
     # Callable aliases
     "NodeFunc",
     "AsyncNodeFunc",

@@ -26,14 +26,23 @@ from graphforge._graph import CompiledGraph
 from graphforge._logging import get_logger
 from graphforge._node import Node, NodeKind
 from graphforge._stream import EventType, StreamEvent
-from graphforge._types import NodeName, StateT, StateUpdate
+from graphforge._types import (
+    AsyncRouterFunc,
+    ConfigDict,
+    END_SENTINEL,
+    NodeName,
+    RouterFunc,
+    StateT,
+    StateUpdate,
+)
 from graphforge.state import GraphState, _build_reducer_map, merge_state
 
 logger = get_logger("executor")
 
 
 DEFAULT_RECURSION_LIMIT = 100
-END_SENTINEL = "__end__"
+
+
 class GraphExecutionPaused(Exception):
     """Raised by a node to pause execution (e.g., waiting for human input).
 
@@ -112,7 +121,7 @@ class SyncExecutor:
                 logger.info("Fan-out node %r (%d branches)", node_name, len(graph._fanout_map[node_name].targets))
                 state = self._execute_fanout(graph, state, node_name, config, step=step)
                 fanout_edge = graph._fanout_map[node_name]
-                node_name = fanout_edge.join or "__end__"
+                node_name = fanout_edge.join or END_SENTINEL
                 step += 1
                 logger.debug("Fan-out step %d: next -> %r", step, node_name)
                 continue
@@ -237,7 +246,7 @@ class SyncExecutor:
                 logger.info("Stream fan-out: %r -> %d branches", node_name, len(graph._fanout_map[node_name].targets))
                 state = self._execute_fanout(graph, state, node_name, config, step=step)
                 fanout_edge = graph._fanout_map[node_name]
-                node_name = fanout_edge.join or "__end__"
+                node_name = fanout_edge.join or END_SENTINEL
                 step += 1
                 continue
 
@@ -312,28 +321,36 @@ class SyncExecutor:
         config: Optional[Dict[str, Any]] = None,
         step: int = 0,
     ) -> StateT:
-        """Execute all branches from a fan-out node sequentially."""
+        """Execute all branches from a fan-out node in parallel."""
         fanout_edge = graph._fanout_map[fanout_node]
-        logger.info("Fan-out %r -> %d branches", fanout_node, len(fanout_edge.targets))
+        logger.info("Fan-out %r -> %d branches (parallel)", fanout_node, len(fanout_edge.targets))
 
-        results: List[StateT] = []
-        for target in fanout_edge.targets:
-            logger.debug("Fan-out branch: %r", target)
-            branch_state = state
+        def run_branch(target: NodeName) -> StateT:
+            """Execute a single fan-out branch."""
+            if hasattr(state, "model_copy"):
+                branch_state = state.model_copy(deep=False)
+            else:
+                branch_state = state  # type: ignore[assignment]
             current: Optional[NodeName] = target
-            while current is not None and current != "__end__":
+            while current is not None and current != END_SENTINEL:
                 if fanout_edge.join and current == fanout_edge.join:
                     break
                 node = graph.get_node(current)
-                step += 1
-                logger.debug("Fan-out branch step %d: node %r", step, current)
+                logger.debug("Fan-out branch %r step: node %r", target, current)
                 updates = node.invoke(branch_state)
                 branch_state = _apply(branch_state, updates)
                 current = self._resolve_next(graph, current, branch_state)
-            results.append(branch_state)
+            return branch_state
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=len(fanout_edge.targets)) as executor:
+            results: List[StateT] = list(
+                executor.map(run_branch, fanout_edge.targets)
+            )
 
         merged = _merge_parallel_results(state, results)
-        logger.info("Fan-out %r done, %d branches merged", fanout_node, len(results))
+        logger.info("Fan-out %r done, %d branches merged (parallel)", fanout_node, len(results))
         return merged
 
     def _resolve_next(
@@ -368,12 +385,6 @@ class SyncExecutor:
             f"but no conditional edge. Use a conditional edge when a node "
             f"has multiple outgoing edges."
         )
-
-
-# ===================================================================
-# AsyncExecutor
-# ===================================================================
-
 
     def resume(
         self,
@@ -467,6 +478,11 @@ class SyncExecutor:
         )
 
 
+# ===================================================================
+# AsyncExecutor
+# ===================================================================
+
+
 class AsyncExecutor:
     """Asynchronous graph executor."""
 
@@ -515,7 +531,7 @@ class AsyncExecutor:
                 logger.info("Async fan-out node %r (%d branches)", node_name, len(graph._fanout_map[node_name].targets))
                 state = await self._execute_fanout(graph, state, node_name, config, step=step)
                 fanout_edge = graph._fanout_map[node_name]
-                node_name = fanout_edge.join or "__end__"
+                node_name = fanout_edge.join or END_SENTINEL
                 step += 1
                 continue
 
@@ -644,31 +660,37 @@ class AsyncExecutor:
         config: Optional[Dict[str, Any]] = None,
         step: int = 0,
     ) -> StateT:
-        """Execute all branches from a fan-out node asynchronously."""
-        fanout_edge = graph._fanout_map[fanout_node]
-        logger.info("Fan-out %r -> %d branches", fanout_node, len(fanout_edge.targets))
+        """Execute all branches from a fan-out node asynchronously (parallel)."""
+        import asyncio
 
-        results: List[StateT] = []
-        for target in fanout_edge.targets:
-            logger.debug("Fan-out branch: %r", target)
-            branch_state = state
+        fanout_edge = graph._fanout_map[fanout_node]
+        logger.info("Fan-out %r -> %d branches (async parallel)", fanout_node, len(fanout_edge.targets))
+
+        async def run_branch(target: NodeName) -> StateT:
+            if hasattr(state, "model_copy"):
+                branch_state = state.model_copy(deep=False)
+            else:
+                branch_state = state  # type: ignore[assignment]
             current: Optional[NodeName] = target
-            while current is not None and current != "__end__":
+            while current is not None and current != END_SENTINEL:
                 if fanout_edge.join and current == fanout_edge.join:
                     break
                 node = graph.get_node(current)
-                step += 1
-                logger.debug("Fan-out branch step %d: node %r", step, current)
+                logger.debug("Fan-out branch %r step: node %r", target, current)
                 if node.kind == NodeKind.ASYNC:
                     updates = await node.ainvoke(branch_state)
                 else:
                     updates = node.invoke(branch_state)
                 branch_state = _apply(branch_state, updates)
                 current = self._resolve_next(graph, current, branch_state)
-            results.append(branch_state)
+            return branch_state
+
+        results: List[StateT] = await asyncio.gather(
+            *[run_branch(target) for target in fanout_edge.targets]
+        )
 
         merged = _merge_parallel_results(state, results)
-        logger.info("Fan-out %r done, %d branches merged", fanout_node, len(results))
+        logger.info("Fan-out %r done, %d branches merged (async parallel)", fanout_node, len(results))
         return merged
 
     def _resolve_next(

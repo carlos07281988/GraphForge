@@ -30,7 +30,10 @@ def interrupt(
         value: Optional data to pass to the caller (e.g. a question or
             context that helps the human provide input).
     """
-    raise GraphExecutionPaused(message)
+    raise GraphExecutionPaused(
+        message,
+        metadata={"interrupt_value": value} if value is not None else None,
+    )
 
 
 __all__ = ["interrupt"]

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 
 import pytest
-from graphforge import Graph, GraphState, node_field, Append, ErrorEdge
+from graphforge import Graph, GraphState, node_field, Append
 from graphforge.agents import ToolNode, has_tool_calls, create_react_agent
 
 
@@ -703,7 +703,7 @@ class TestMermaidExport:
         assert "0|" in m or "|" in m  # edge labels
 
     def test_export_error_edge(self) -> None:
-        from graphforge import export_mermaid, ErrorEdge
+        from graphforge import export_mermaid
 
         g = (
             Graph[MerState]()

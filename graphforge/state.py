@@ -270,8 +270,8 @@ class GraphState(BaseModel):
         extra="forbid",
         validate_assignment=True,
         frozen=False,
-    arbitrary_types_allowed=True,
-)
+        arbitrary_types_allowed=True,
+    )
 
     if not IS_PYDANTIC_V2:
         class Config:

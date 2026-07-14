@@ -34,7 +34,7 @@ from graphforge._http_server import GraphServer
 from graphforge._webhook import WebhookCallback
 from graphforge._tracing import TracingCallback
 from graphforge._callbacks import Callback, CallbackManager
-from graphforge._edge import ErrorEdge, FanOutEdge
+from graphforge._edge import FanOutEdge
 from graphforge._executor import GraphExecutionPaused
 from graphforge._visualize import export_dot, render_graph
 from graphforge._logging import configure_logging, get_logger
@@ -74,8 +74,7 @@ __all__ = [
     "export_mermaid",
     "GraphServer",
     "TracingCallback",
-    "WebhookCallback",
-    "ErrorEdge",
+    "END_SENTINEL",
     "FanOutEdge",
     # Visualise
     "export_dot",

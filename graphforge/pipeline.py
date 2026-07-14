@@ -87,7 +87,7 @@ class Pipeline(Generic[StateT]):
                 f"use ``arun()`` instead."
             )
 
-        accumulated: Dict[str, Any] = _dump(initial_state)
+        accumulated: Dict[str, Any] = _model_dump(initial_state)
         logger.info("Pipeline %r: running %d steps", self._name, len(self._steps))
 
         for i, step in enumerate(self._steps):
@@ -106,8 +106,8 @@ class Pipeline(Generic[StateT]):
         **kwargs: Any,
     ) -> StateUpdate:
         """Execute the pipeline asynchronously."""
-        accumulated: Dict[str, Any] = _dump(initial_state)
-        logger.info("Pipeline %r: async running %d steps", self._name, len(self._steps))
+        accumulated: Dict[str, Any] = _model_dump(initial_state)
+        logger.info("Pipeline %r: running %d steps", self._name, len(self._steps))
 
         for i, step in enumerate(self._steps):
             state_obj = _reify(accumulated, initial_state)
@@ -136,7 +136,12 @@ class Pipeline(Generic[StateT]):
 # Helpers
 # ---------------------------------------------------------------------------
 
-from graphforge._executor import _dump  # noqa: E402
+
+def _model_dump(state: Any) -> Dict[str, Any]:
+    """Dump state to a plain dict (handles Pydantic v2 models and dicts)."""
+    if hasattr(state, "model_dump"):
+        return state.model_dump()
+    return dict(state)
 
 
 def _reify(
