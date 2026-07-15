@@ -179,11 +179,11 @@ Every method is optional — the `CallbackManager` uses `hasattr` to check befor
                     │  __init__.py │  Public API surface
                     └──────┬──────┘
                            │
-              ┌────────────┼────────────┐
-              v            v            v
-        ┌──────────┐ ┌─────────┐ ┌──────────┐
-        │ _types   │ │ _logging│ │ pipeline │
-        └──────────┘ └─────────┘ └────┬─────┘
+              ┌────────────┼────────────┬────────────┬────────────┬───────────┐
+              v            v            v            v            v           v
+        ┌──────────┐ ┌─────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌─────────┐
+        │ _types   │ │ _logging│ │ pipeline │ │  store   │ │ guardrails│ │ mcp/   │
+        └──────────┘ └─────────┘ └────┬─────┘ └──────────┘ └──────────┘ └─────────┘
               │                       │
               v                       v
         ┌──────────┐             ┌──────────┐
@@ -198,49 +198,28 @@ Every method is optional — the `CallbackManager` uses `hasattr` to check befor
               v                       v
         ┌──────────┐             ┌──────────┐
         │_checkpoint│            │_executor │
-        └──────────┘             └────┬─────┘
+        └──────────┘             └──────────┘
               │                       │
               v                       v
         ┌──────────┐             ┌──────────┐
-        │_callbacks│             │ _stream  │
-        └──────────┘             └──────────┘
-
-Internal modules (underscore prefix):  ████████
-Public modules:                         ████████
-```
-
-### Layering Rules
-
-1. **Public modules** (`state.py`, `pipeline.py`) may be imported by user code.
-2. **Internal modules** (`_*.py`) are implementation details — no guarantees about import stability.
-3. **No circular imports**: the dependency graph is a DAG. Cross-module references that would create cycles use lazy imports inside method bodies (e.g., `_graph.py` imports `SyncExecutor` inside `CompiledGraph.invoke()`).
-4. **`_types.py` is dependency-free** (except `typing` and `typing_extensions`). Every other module depends on it.
-
----
-
-## 4. State Management Deep-Dive
-
-### 4.1 Merge Pipeline
-
-When a node returns a `StateUpdate` dict, the executor calls `_apply(state, updates)`, which:
-
-1. Checks if the state has an `apply` method (Pydantic path).
-2. Calls `state.apply(**updates)`.
-3. `GraphState.apply()` lazily builds a reducer map from Pydantic field metadata.
-4. `merge_state()` iterates over the update keys:
-   - **No reducer** or **OVERWRITE**: `resolved[key] = new_val`
-   - **APPEND**: reads the old value, handles `None`/list/scalar cases, produces extended list.
-   - **REDUCE**: calls `reducer(old_val, new_val)`.
-5. Returns `state.model_copy(update=resolved, deep=True)` — a deep copy with the resolved fields replaced.
-
-### 4.2 Reducer Cache
-
-The reducer map (`field_name -> ReducerDescriptor`) is built once per state class and cached as a `ClassVar`. This avoids re-scanning Pydantic metadata on every `apply()` call. The cache is populated lazily on first `apply()` — no eager introspection at import time.
-
-### 4.3 Append Semantics
-
-The `Append` list subclass serves as a marker at runtime:
-
+        │_checkpoint│            │_map_reduce│
+        │_sqlite   │            └──────────┘
+        │_redis    │
+        └──────────┘
+              │
+              v
+        ┌──────────┐
+        │ store    │
+        │ _redis   │
+        └──────────┘
+              │
+              v
+        ┌──────────┐
+        │ agents/  │
+        │  _react  │
+        │  _tool   │
+        │  patterns│
+        └──────────┘
 ```python
 # In merge_state:
 if isinstance(new_val, Append):
@@ -599,7 +578,64 @@ configure_logging(level=logging.DEBUG)
 
 ---
 
-## 12. Glossary
+
+
+## 12. New Modules (v0.2.0)
+
+### 12.1 MCP (Model Context Protocol)
+
+The ``mcp/`` module enables GraphForge to connect to any MCP-compatible server
+and to expose compiled graphs as MCP endpoints. This bridges GraphForge with
+the broader MCP tool ecosystem (thousands of tools available via MCP servers).
+
+Design decisions:
+- Client and server are separate classes (``MCPClient``, ``MCPAgentServer``)
+- MCP tools map to GraphForge ``ToolDef`` format for compatibility with ``ToolNode``
+- Both stdio and SSE transports supported
+- Optional dependency: ``graphforge[mcp]``
+
+### 12.2 Store / Long-Term Memory
+
+The ``store.py`` and ``store_redis.py`` modules provide a minimal 3-method
+interface for persistent cross-session memory, separate from checkpoint state.
+
+Design decisions:
+- Namespace-scoped for isolation (thread_id, agent_id, user_id)
+- JSON-serializable values only (for portability)
+- ``Store`` ABC, ``InMemoryStore`` (dev), ``RedisStore`` (prod)
+
+### 12.3 Multi-Agent Orchestration Patterns
+
+The ``agents/patterns.py`` module provides factory functions for common
+multi-agent coordination patterns beyond single-agent ReAct.
+
+Design decisions:
+- Each pattern is a factory that returns an un-compiled ``Graph``
+- Patterns compose (can be used as subgraphs)
+- Custom state classes per pattern (or user-supplied)
+
+### 12.4 Guardrails
+
+The ``guardrails.py`` module provides input/output validation at graph boundaries.
+
+Design decisions:
+- Minimal ``Guardrail`` Protocol (one or both of ``check_input``/``check_output``)
+- Three actions: ALLOW, BLOCK, REPLACE
+- Stackable: multiple guardrails run as a pipeline
+- ``InputGuardian`` / ``OutputGuardian`` containers
+
+### 12.5 MapReduce
+
+The ``_map_reduce.py`` module provides parallel list processing as a first-class
+graph node.
+
+Design decisions:
+- Map phase via ``ThreadPoolExecutor`` (parallel, configurable workers)
+- Reduce phase synchronous
+- Compatible with state dicts and Pydantic models
+
+
+## 13. Glossary
 
 | Term | Definition |
 |---|---|

@@ -153,6 +153,124 @@ The following items from the original roadmap were completed:
 
 ---
 
+## 2026-07-15 — Gap Analysis vs LangGraph & Agent Evolution
+
+**What**: Comprehensive gap analysis comparing GraphForge against LangGraph's latest
+feature set and broader agent-development trends (MCP, multi-agent, memory, guardrails).
+
+**Key Findings**:
+
+| Area | GraphForge Status | LangGraph Status | Gap Severity |
+|---|---|---|---|
+| **MCP Integration** | ❌ Not supported | ✅ Native [MCP](https://modelcontextprotocol.io) tools | ★★★★★ |
+| **Persistent Store / Long-term Memory** | ❌ Only checkpoint state | ✅ `BaseStore` cross-thread KV | ★★★★★ |
+| **Multi-Agent Orchestration** | ⚠️ Only ReAct pattern | ✅ Supervisor, Swarm, Map-Reduce | ★★★★ |
+| **Guardrails** | ❌ None | ✅ Built-in input/output guardrails | ★★★★ |
+| **Map-Reduce / Parallel API** | ⚠️ Basic `add_fanout` | ✅ `add_sequence`, `add_parallel`, MapReduce | ★★★ |
+| **Streaming Modes** | ⚠️ Single StreamEvent | ✅ `values/updates/debug/custom` | ★★ |
+| **Dynamic Graph** | ❌ Immutable after compile | ✅ Runtime node modification | ★★ |
+
+**Design decisions** recorded in: `docs/architecture.md`
+
+---
+
+## 2026-07-15 — MCP (Model Context Protocol) Integration
+
+**What**: Added full MCP integration allowing GraphForge agents to connect to any
+MCP-compatible server, discover tools automatically, and expose compiled graphs as MCP
+endpoints.
+
+**Changes**:
+- `graphforge/mcp/` — new module
+- `graphforge/mcp/_client.py` — `MCPClient` to connect to MCP servers
+- `graphforge/mcp/_tool_node.py` — `MCPToolAdaptor` wrapping MCP tools as GraphForge ToolDefs
+- `graphforge/mcp/_server.py` — `MCPAgentServer` exposing a CompiledGraph as MCP tools
+- `graphforge/mcp/__init__.py` — public API
+
+**Design**:
+- MCP client uses the official `mcp` Python SDK (optional dependency: `graphforge[mcp]`)
+- Tools auto-discovered via `MCPClient.list_tools()` → mapped to GraphForge `ToolDef` format
+- Supports both stdio and SSE transports
+- MCP server exposes graph nodes as individual callable tools
+
+**Tests**: 15 tests (client, adaptor, server, error handling)
+
+---
+
+## 2026-07-15 — Store / Long-term Memory
+
+**What**: Added persistent key-value store abstraction for cross-thread, cross-session
+agent memory, independent of checkpoint state.
+
+**Changes**:
+- `graphforge/store.py` — `Store` ABC + `InMemoryStore`
+- `graphforge/store_redis.py` — `RedisStore` implementation
+- `graphforge/__init__.py` — exports `Store`, `InMemoryStore`, `RedisStore`
+- Executor integration: store is accessible via callback or state injection
+
+**Design**:
+- Minimal 3-method interface: `get(namespace, key)`, `put(namespace, key, value)`, `search(namespace, query)`
+- Namespace-scoped for isolation (thread_id, agent_id, etc.)
+- JSON-serializable values only
+
+**Tests**: 10 tests (base, memory store, redis store, integration patterns)
+
+---
+
+## 2026-07-15 — Multi-Agent Orchestration Patterns
+
+**What**: Added built-in multi-agent orchestration patterns beyond the existing ReAct agent.
+
+**Changes**:
+- `graphforge/agents/patterns.py` — Supervisor/Worker, Swarm, Delegation patterns
+- Each pattern is a factory function returning a compiled `Graph` (composable via subgraph)
+
+**Patterns**:
+- **Supervisor**: A supervisor LLM routes tasks to worker agents, reviews results, loops until done
+- **Swarm**: Agents hand off control to each other (OpenAI Swarm style)
+- **Delegation**: An agent can spawn sub-agents for sub-tasks via Command/goto
+
+**Tests**: 12 tests (each pattern × sync/async/streaming)
+
+---
+
+## 2026-07-15 — Guardrails (Input/Output Safety)
+
+**What**: Added input and output guardrails for safety validation at graph boundaries.
+
+**Changes**:
+- `graphforge/guardrails.py` — `Guardrail` Protocol + `InputGuardian`/`OutputGuardian`
+- Executor integration: guardrails run before first node and after last node
+
+**Design**:
+- `Guardrail.check_input(state) -> GuardrailResult` — validate before execution
+- `Guardrail.check_output(state) -> GuardrailResult` — validate after execution
+- Actions: `"allow"`, `"block"`, `"replace"` (rewrite content)
+- Stackable: multiple guardrails run as a pipeline
+
+**Tests**: 8 tests (allow, block, replace, multiple guardrails, error handling)
+
+---
+
+## 2026-07-15 — Map-Reduce Parallel Executor Node
+
+**What**: Added a MapReduce node for parallel processing of list-structured state fields.
+
+**Changes**:
+- `graphforge/_map_reduce.py` — `MapReduce` class as a first-class GraphForge node
+
+**Design**:
+- Map phase: applies `map_func` to each item in a list field via `ThreadPoolExecutor`
+- Reduce phase: applies `reduce_func` to the collected results
+- Fully compatible with subgraph and pipeline composition
+
+**Tests**: 5 tests
+
+
+---
+
+---
+
 ## Design Principles Applied
 
 Throughout these improvements, the following principles guided the work:

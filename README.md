@@ -495,6 +495,216 @@ result = compiled.invoke(ReactState(messages=[{"role": "user", "content": "searc
 
 
 
+
+## MCP (Model Context Protocol) Integration
+
+GraphForge supports the [Model Context Protocol (MCP)](https://modelcontextprotocol.io), the industry standard for tool integration. MCP enables GraphForge agents to connect to any MCP-compatible server, auto-discover tools, and invoke them — or expose compiled graphs as MCP endpoints for other agents.
+
+Requires ``mcp`` package (install with ``pip install graphforge[mcp]``).
+
+### MCP Client — Call External MCP Servers
+
+Connect to any MCP server and use its tools in your graph:
+
+```python
+from graphforge.mcp import MCPClient
+from graphforge.agents import ToolNode
+
+# Connect to an MCP server (stdio or SSE transport)
+client = MCPClient("npx", args=["-y", "@modelcontextprotocol/server-filesystem"])
+
+# Auto-discover tools and convert to ToolDef format
+from graphforge.mcp import mcp_tools_to_tool_defs
+
+async def get_tools():
+    async with client:
+        mcp_tools = await client.list_tools()
+        tool_defs = mcp_tools_to_tool_defs(mcp_tools, client.call_tool)
+        return tool_defs
+
+# Use as a ToolNode in your graph
+# ToolNode expects (llm_func, tools=tool_defs)
+```
+
+### MCP Agent Server — Expose Graph as MCP Tools
+
+Expose each node of your compiled graph as an MCP tool:
+
+```python
+from graphforge.mcp import MCPAgentServer
+
+server = MCPAgentServer(compiled_graph, server_name="my-agent")
+server.serve()  # Starts stdio-based MCP server
+```
+
+**Transports**: Both ``stdio`` (subprocess) and ``SSE`` (HTTP) supported.
+
+---
+
+## Store / Long-Term Memory
+
+Agents need persistent memory beyond execution checkpoints. The ``Store`` abstraction provides cross-session, cross-thread key-value storage for agent memory — separate from checkpoint state.
+
+```python
+from graphforge import Store, InMemoryStore
+
+store = InMemoryStore()
+
+store.put("session-123", "user_prefs", {"theme": "dark", "language": "zh-CN"})
+prefs = store.get("session-123", "user_prefs")
+print(prefs)  # {"theme": "dark", "language": "zh-CN"}
+
+# Namespace isolation
+store.put("session-456", "user_prefs", {"theme": "light"})
+```
+
+### Redis Store
+
+For production deployments, use the Redis-backed store:
+
+```python
+from graphforge.store_redis import RedisStore
+
+store = RedisStore(host="localhost", port=6379, db=0)
+# or pass an existing Redis client:
+# store = RedisStore(redis_client=existing_redis)
+```
+
+**API**:
+
+| Method | Description |
+|---|---|
+| ``get(namespace, key)`` | Retrieve a value |
+| ``put(namespace, key, value)`` | Store/overwrite a value |
+| ``delete(namespace, key)`` | Remove a key |
+| ``list_keys(namespace)`` | List all keys in a namespace |
+| ``clear_namespace(namespace)`` | Remove all keys in a namespace |
+
+---
+
+## Multi-Agent Orchestration Patterns
+
+GraphForge provides built-in multi-agent coordination patterns that go beyond single-agent ReAct. Each pattern is a factory function returning a compiled ``Graph`` that can be used standalone or embedded as a subgraph.
+
+### Supervisor/Worker
+
+A supervisor agent routes tasks to specialized workers, reviews their output, and decides when to finish:
+
+```python
+from graphforge.agents import create_supervisor_worker, SupervisorState
+
+def supervisor_fn(state):
+    task = state.get("task", "")
+    if "search" in task:
+        return {"current_worker": "search_worker"}
+    return {"done": True, "final_answer": "No worker needed"}
+
+def search_worker(state):
+    return {"messages": [{"role": "assistant", "content": f"Searched for: {state.get('task')}"}]}
+
+graph = create_supervisor_worker(supervisor_fn, {"search_worker": search_worker})
+compiled = graph.compile(state_type=SupervisorState)
+```
+
+### Swarm
+
+Agents hand off control to each other via a router function (OpenAI Swarm style):
+
+```python
+from graphforge.agents import create_swarm, SwarmState
+
+def router_fn(state):
+    current = state.get("current_agent", "")
+    if current == "agent_a":
+        return "agent_b"
+    if current == "agent_b":
+        return None  # terminate
+    return "agent_a"
+
+graph = create_swarm({"agent_a": agent_a_fn, "agent_b": agent_b_fn}, router_fn)
+compiled = graph.compile(state_type=SwarmState)
+```
+
+### Delegation
+
+An orchestrator agent delegates sub-tasks to specialized compiled sub-agents:
+
+```python
+from graphforge.agents import create_delegation_agent
+
+sub_agent = Graph[TaskState]().add_node(...).compile(state_type=TaskState)
+graph = create_delegation_agent(orchestrator_fn, {"sub_agent": sub_agent})
+```
+
+Each pattern comes with its own state class (``SupervisorState``, ``SwarmState``) or accepts custom state types.
+
+---
+
+## Guardrails (Input/Output Safety)
+
+Guardrails provide safety validation at graph boundaries:
+
+```python
+from graphforge.guardrails import (
+    InputGuardian, OutputGuardian,
+    FieldLengthGuardrail,
+    GuardrailError,
+)
+
+# Built-in guardrails
+length_check = FieldLengthGuardrail("prompt", max_length=5000)
+
+# Apply to graph execution
+guardian = InputGuardian([length_check])
+result = guardian.check({"prompt": "user input here..."})  # raises GuardrailError if blocked
+```
+
+**Custom guardrails**:
+
+```python
+from graphforge.guardrails import Guardrail, GuardrailResult
+
+class PIIGuardrail:
+    def check_input(self, state):
+        text = str(state)
+        if "ssn:" in text:
+            return GuardrailResult.block("PII detected")
+        return GuardrailResult.allow()
+
+guardian = InputGuardian([PIIGuardrail()])
+```
+
+**Actions**: ``ALLOW`` (proceed), ``BLOCK`` (raise error), ``REPLACE`` (rewrite content).
+
+---
+
+## MapReduce — Parallel Data Processing
+
+Process list-structured state fields in parallel:
+
+```python
+from graphforge._map_reduce import MapReduce
+
+def analyze(item: str) -> str:
+    return f"Processed: {item}"
+
+def combine(results: list) -> str:
+    return "\n".join(results)
+
+# Creates a callable node for Graph.add_node()
+mr = MapReduce(
+    analyze, combine,
+    input_field="chunks",     # State field with input list
+    output_field="summary",   # State field for output
+    max_workers=4,
+)
+
+graph.add_node("parallel_process", mr)
+```
+
+The map phase runs in parallel via ``ThreadPoolExecutor``; the reduce phase combines results.
+
+
 ## Execution Modes
 
 ### Invoke
@@ -853,10 +1063,15 @@ A detailed record of all improvements is maintained in [](docs/improvements.md).
 
 ### Future Work
 
- - A2A push notifications (webhook-based task updates) (webhook-based task updates)
- - OpenTelemetry tracing for node-level observability
+ - A2A push notifications (webhook-based task updates)
+ - OpenTelemetry tracing for node-level observability (tracing callback exists, needs deeper integration)
  - Human-in-the-loop patterns (approval nodes, interrupt/resume)
  - Distributed execution (Dask/Ray integration)
+ - Persistent Store backends (Postgres, S3, file-based)
+ - Streaming mode variants (values/updates/debug/custom)
+ - Dynamic graph — runtime node addition/removal
+ - Agent evaluation framework for testing agent behavior
+ - WebSocket streaming for real-time chat
 
 ---
 

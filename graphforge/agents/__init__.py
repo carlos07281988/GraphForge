@@ -12,17 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""GraphForge Agents — built-in agent patterns and tool integration.
+"""Agent tools and patterns for GraphForge."""
 
-Provides reusable node types and higher-level agent patterns built on top
-of the core graph execution engine.
-"""
-
-from graphforge.agents._tool_node import ToolNode, has_tool_calls
-from graphforge.agents._react import create_react_agent
+from graphforge.agents._tool_node import ToolNode, ToolRegistry, has_tool_calls, ToolCall, ToolDef
+from graphforge.agents._react import ReactState, create_react_agent
+from graphforge.agents.patterns import (
+    SupervisorState,
+    SwarmState,
+    create_supervisor_worker,
+    create_swarm,
+    create_delegation_agent,
+)
 
 __all__ = [
     "ToolNode",
+    "ToolRegistry",
+    "ToolCall",
+    "ToolDef",
     "has_tool_calls",
+    "ReactState",
     "create_react_agent",
+    "SupervisorState",
+    "SwarmState",
+    "create_supervisor_worker",
+    "create_swarm",
+    "create_delegation_agent",
 ]
