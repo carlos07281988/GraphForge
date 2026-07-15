@@ -1,29 +1,53 @@
-# GraphForge
+<div align="center">
 
-> A type-safe, composable graph execution framework for LLM applications.
-> Inspired by LangGraph, engineered to avoid its mistakes.
+<pre width="80">
+   ______                 __    ______                    
+  / ____/________ _____  / /_  / ____/___  _________ ____ 
+ / / __/ ___/ __ `/ __ \/ __ \/ /_  / __ \/ ___/ __ `/ _ \
+/ /_/ / /  / /_/ / /_/ / / / / __/ / /_/ / /  / /_/ /  __/
+\____/_/   \__,_/ .___/_/ /_/_/    \____/_/   \__, /\___/ 
+               /_/                           /____/       
+</pre>
+
+**GraphForge** · _A type-safe, composable graph execution framework for LLM applications._  
+_Inspired by LangGraph, engineered to avoid its mistakes._
+
+<br/>
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9%2B-blue?style=flat&logo=python)](https://www.python.org)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-4A90D9?style=flat&logo=python)](https://docs.pydantic.dev)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat)](LICENSE)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat)](https://github.com/carlos07281988/GraphForge/pulls)
 
+<br/>
+
+</div>
+
 ```python
 from graphforge import Graph, GraphState, node_field, Append
 
 class ChatState(GraphState):
-    messages: list = node_field(default=[], merge="append")
+    messages: list[str] = node_field(default=[], merge="append")
     next_step: str = ""
 
-def llm_call(state: ChatState) -> dict:
-    return {"messages": Append(["response"]), "next_step": "done"}
+def gather(state: ChatState) -> dict:
+    return {"next_step": "process"}
 
-graph = Graph[ChatState]()
-graph.add_node("llm", llm_call)
-graph.add_edge("llm", "__end__")
-graph.set_entry_point("llm")
-compiled = graph.compile()
-result = compiled.invoke(ChatState())
+def process(state: ChatState) -> dict:
+    return {"messages": Append(["processed"]), "next_step": "done"}
+
+graph = (
+    Graph[ChatState]()
+    .add_node("gather", gather)
+    .add_node("process", process)
+    .add_edge("gather", "process")
+    .add_edge("process", "__end__")
+    .set_entry_point("gather")
+    .compile()
+)
+
+result = graph.invoke(ChatState())
+print(result.messages)  # ["processed"]
 ```
 
 ---
