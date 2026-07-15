@@ -202,6 +202,12 @@ __all__.extend([
     "TaskStatus",
 ])
 
+
+__all__.extend([
+    "serve",
+    "UnifiedServer",
+])
+
 __all__.sort()
 __all__.extend(["__version__", "__version_info__",
     "GraphExecutionPaused", "SqliteCheckpointer"])

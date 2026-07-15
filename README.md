@@ -1075,6 +1075,74 @@ When interrupted, the graph saves a checkpoint. Resume with
 
 
 
+## `serve()` — One-Command API Server
+
+Turn any compiled graph into a production-ready API server with a single function call.
+Starts REST, WebSocket, MCP, and A2A servers simultaneously:
+
+```python
+from graphforge import serve
+
+# One line → REST + WebSocket + MCP + A2A on port 8080
+serve(compiled_graph)
+
+# Custom port + auth
+serve(graph, port=9090, api_key="sk-...")
+```
+
+**Endpoints**: ``POST /invoke``, ``POST /stream`` (SSE), ``GET /ws`` (WebSocket),
+``GET /health``, ``GET /docs`` (auto-generated Swagger).
+
+---
+
+## AutoOptimizer — Automatic Graph Parallelization
+
+Static analysis that detects independent execution paths and suggests or
+automatically applies parallelization:
+
+```python
+from graphforge._optimizer import optimize, auto_parallelize
+
+# Analyze an existing compiled graph
+report = optimize(compiled_graph)
+print(report.summary())
+# → Independent paths: 2, Unused nodes: 0, Bottlenecks: 1
+
+# Apply suggestions to a graph builder
+optimized = auto_parallelize(graph_builder, state_type)
+# Independent paths are now parallel fan-out edges
+```
+
+The optimizer detects: parallelizable paths, unused nodes, bottlenecks, cycles.
+
+---
+
+## TimelineRecorder — Execution Debugger
+
+Record every state transition for post-mortem debugging and replay:
+
+```python
+from graphforge import CallbackManager
+from graphforge._timeline import TimelineRecorder
+
+recorder = TimelineRecorder()
+compiled.invoke(state, callbacks=CallbackManager([recorder]))
+
+# Inspect
+for frame in recorder.get_timeline():
+    print(f"{frame.node}: {list(frame.updates.keys())} ({frame.duration:.3f}s)")
+
+# Export to JSON
+recorder.export_json("trace.json")
+
+# Replay step by step
+for frame in recorder.replay():
+    print(frame.node, frame.state_after)
+```
+
+Each frame captures: node name, step, state before/after, updates, duration.
+
+
 ## Execution Modes
 
 ### Invoke

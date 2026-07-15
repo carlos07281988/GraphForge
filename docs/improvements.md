@@ -731,6 +731,79 @@ decision handling.
 
 ---
 
+## 2026-07-16 — v0.5.0 — 逆天功能实现
+
+**What**: Three industry-first features that go beyond LangGraph's capabilities:
+unified ``serve()``, automatic graph optimization, and execution timeline debugging.
+
+---
+
+## 2026-07-16 — serve() — One-Command Unified API Server
+
+**What**: Added a single ``serve()`` function that converts any CompiledGraph
+into a production-ready API server supporting REST, WebSocket, MCP, A2A, and
+Swagger documentation — simultaneously.
+
+**Changes**:
+- ``graphforge/serve.py`` — new module with ``serve()`` function
+- Unifies ``GraphServer`` (HTTP/WS), ``MCPAgentServer``, and ``A2AServer``
+
+**Design**:
+- ``serve(graph, host="0.0.0.0", port=8080)`` starts all protocols on one port
+- HTTP: POST /invoke, POST /stream (SSE), GET /health
+- WebSocket: /ws for bidirectional streaming
+- MCP: /.well-known/mcp for tool discovery, /mcp/call for invocation
+- A2A: /.well-known/agent-card, POST /tasks/send
+- Swagger: GET /docs with auto-generated OpenAPI spec
+- Auth: Optional API key support
+
+**Tests**: 6 tests (import, structure, config)
+
+---
+
+## 2026-07-16 — AutoOptimizer — Automatic Graph Parallelization
+
+**What**: Static graph analysis that automatically detects independent execution
+paths and converts them to parallel fan-out edges, without user annotation.
+
+**Changes**:
+- ``graphforge/_optimizer.py`` — new module with ``AutoOptimizer`` class
+
+**Design**:
+- Analyzes node dependencies based on state field read/write patterns
+- Detects independent subgraphs (nodes that don't depend on each other)
+- Automatically inserts fan-out edges for independent paths
+- ``auto_parallelize(graph, state_type)`` returns an optimized graph
+- Also detects: unused nodes, redundant computations, potential bottlenecks
+- ``optimize(graph, state_type)`` returns ``OptimizationReport`` with suggestions
+
+**Tests**: 8 tests
+
+---
+
+## 2026-07-16 — TimelineRecorder — Execution Recording & Replay
+
+**What**: Full execution recording that captures every state transition for
+post-mortem debugging, replay, and inspection.
+
+**Changes**:
+- ``graphforge/_timeline.py`` — new module with ``TimelineRecorder``
+
+**Design**:
+- Records every state transition with full context (node, updates, timing)
+- ``TimelineRecorder.get_timeline()`` returns ordered list of frames
+- ``TimelineRecorder.export_json()`` for offline analysis
+- ``TimelineRecorder.replay()`` yields frames in order for custom replay
+- Compatible with existing ``Callback`` protocol
+- Frames include: node name, step, state before, state after, updates, duration
+
+**Tests**: 8 tests
+
+---
+
+
+---
+
 ## Design Principles Applied
 
 Throughout these improvements, the following principles guided the work:
