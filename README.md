@@ -1,13 +1,6 @@
 <div align="center">
 
-<pre width="80">
-   ______                 __    ______                    
-  / ____/________ _____  / /_  / ____/___  _________ ____ 
- / / __/ ___/ __ `/ __ \/ __ \/ /_  / __ \/ ___/ __ `/ _ \
-/ /_/ / /  / /_/ / /_/ / / / / __/ / /_/ / /  / /_/ /  __/
-\____/_/   \__,_/ .___/_/ /_/_/    \____/_/   \__, /\___/ 
-               /_/                           /____/       
-</pre>
+<img src="docs/logo.png" alt="GraphForge Logo" width="800"/>
 
 **GraphForge** · _A type-safe, composable graph execution framework for LLM applications._  
 _Inspired by LangGraph, engineered to avoid its mistakes._
