@@ -31,6 +31,24 @@ from typing import Any, Dict, List, Optional
 class EventType(str, Enum):
     """Categories of stream events."""
 
+class StreamMode(str, Enum):
+    """Streaming modes controlling event granularity."""
+
+    VALUES = "values"
+    """Emit full state after each node."""
+
+    UPDATES = "updates"
+    """Emit only the updates dict from each node."""
+
+    DEBUG = "debug"
+    """Emit full event metadata including timing and node info."""
+
+    EVENTS = "events"
+    """Emit structured StreamEvent objects (default, backward compat)."""
+
+class EventType(str, Enum):
+    """Categories of stream events."""
+
     NODE_START = "node_start"
     """A node is about to execute."""
 
@@ -103,4 +121,5 @@ class StreamEvent:
 __all__ = [
     "EventType",
     "StreamEvent",
+    "StreamMode",
 ]

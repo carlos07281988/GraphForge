@@ -28,6 +28,7 @@ Both support standard execution (``execute()``) and streaming (``stream()``).
 
 from __future__ import annotations
 
+import inspect
 import logging
 from collections.abc import AsyncGenerator, Generator
 from typing import Any, Dict, List, Optional, Sequence
@@ -49,12 +50,48 @@ from graphforge._types import (
     StateT,
     StateUpdate,
 )
+import threading
 from graphforge.state import GraphState, _build_reducer_map, merge_state
 
-logger = get_logger("executor")
+
 
 
 DEFAULT_RECURSION_LIMIT = 100
+
+logger = get_logger("executor")
+
+# Cancellation support: thread_id -> threading.Event
+_cancel_events: Dict[str, threading.Event] = {}
+
+
+class GraphCancelled(Exception):
+    """Raised when a graph execution is cancelled."""
+    pass
+
+
+def _check_cancelled(thread_id: str) -> None:
+    """Check if cancellation was requested for this thread."""
+    event = _cancel_events.get(thread_id)
+    if event is not None and event.is_set():
+        logger.warning("Thread %r cancelled", thread_id)
+        raise GraphExecutionPaused(
+            f"Execution cancelled for thread {thread_id!r}",
+            metadata={"_cancelled": True},
+        )
+
+
+def _signal_cancel(thread_id: str) -> None:
+    """Signal cancellation for a thread."""
+    if thread_id not in _cancel_events:
+        _cancel_events[thread_id] = threading.Event()
+    _cancel_events[thread_id].set()
+    logger.info("Cancellation signalled for thread %r", thread_id)
+
+
+def _clear_cancel(thread_id: str) -> None:
+    """Clear cancellation signal for a thread."""
+    _cancel_events.pop(thread_id, None)
+
 
 
 class GraphExecutionPaused(Exception):
@@ -98,6 +135,7 @@ class SyncExecutor:
         config: Optional[Dict[str, Any]] = None,
         *,
         start_node: Optional[NodeName] = None,
+        store: Optional[Any] = None,
     ) -> StateT:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -126,6 +164,9 @@ class SyncExecutor:
                     f"({recursion_limit}) at step {step}."
                 )
 
+            # Check cancellation
+            _check_cancelled(thread_id)
+
             if node_name == END_SENTINEL:
                 break
             node = graph.get_node(node_name)
@@ -144,7 +185,11 @@ class SyncExecutor:
             logger.debug("State before %r: %s", node_name, _dump(state))
             self._callbacks.on_node_start(node_name, _dump(state))
             try:
-                updates = node.invoke(state)
+                # Pass store to node if it accepts the parameter
+                if store is not None and _node_accepts_param(node, 'store'):
+                    updates = node.invoke(state, store=store)
+                else:
+                    updates = node.invoke(state)
             except GraphExecutionPaused as pause:
                 logger.info("Node %r paused execution: %s", node_name, pause.message)
                 self._callbacks.on_node_error(node_name, pause)
@@ -160,7 +205,10 @@ class SyncExecutor:
                     logger.info("Node %r failed (attempt 1/%d), retrying...", node_name, node.retry + 1)
                     for attempt in range(1, node.retry + 1):
                         try:
-                            updates = node.invoke(state)
+                            if store is not None and _node_accepts_param(node, 'store'):
+                                updates = node.invoke(state, store=store)
+                            else:
+                                updates = node.invoke(state)
                             break
                         except GraphExecutionPaused:
                             raise
@@ -232,6 +280,8 @@ class SyncExecutor:
         config: Optional[Dict[str, Any]] = None,
         *,
         start_node: Optional[NodeName] = None,
+        store: Optional[Any] = None,
+        stream_mode: str = "events",
     ) -> Generator[StreamEvent, None, None]:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -313,6 +363,23 @@ class SyncExecutor:
 
             state = new_state
             step += 1
+
+            # Streaming mode: filter/transform events
+            if stream_mode == "values":
+                yield StreamEvent(
+                    EventType.NODE_END, node=node_name, data=_dump(new_state), step=step, metadata={"mode": "values"}
+                )
+            elif stream_mode == "updates":
+                yield StreamEvent(
+                    EventType.STATE_UPDATE, node=node_name,
+                    data={"updates": updates}, step=step, metadata={"mode": "updates"}
+                )
+            elif stream_mode == "debug":
+                import time as _time
+                yield StreamEvent(
+                    EventType.NODE_END, node=node_name, data=_dump(new_state),
+                    step=step, metadata={"mode": "debug", "timestamp": _time.time(), "updates": list(updates.keys())}
+                )
 
             next_name = self._resolve_next(graph, node_name, state)
             if node_name in graph._conditionals:
@@ -408,6 +475,7 @@ class SyncExecutor:
         *,
         updates: Optional[StateUpdate] = None,
         config: Optional[Dict[str, Any]] = None,
+        store: Optional[Any] = None,
     ) -> StateT:
         """Resume execution from the last checkpoint.
 
@@ -468,6 +536,7 @@ class SyncExecutor:
                 graph, state,
                 start_node=resume_node,
                 config={**(config or {}), "thread_id": thread_id},
+                store=store,
             )
 
         last_node: NodeName = last_key[1]
@@ -489,6 +558,7 @@ class SyncExecutor:
             graph, state,
             start_node=next_node,
             config={**(config or {}), "thread_id": thread_id},
+            store=store,
         )
 
 
@@ -515,6 +585,7 @@ class AsyncExecutor:
         config: Optional[Dict[str, Any]] = None,
         *,
         start_node: Optional[NodeName] = None,
+        store: Optional[Any] = None,
     ) -> StateT:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -538,6 +609,9 @@ class AsyncExecutor:
                     f"Graph {graph.name!r} exceeded recursion limit "
                     f"({recursion_limit}) at step {step}."
                 )
+
+            # Check cancellation
+            _check_cancelled(thread_id)
 
             node = graph.get_node(node_name)
 
@@ -594,6 +668,9 @@ class AsyncExecutor:
         graph: CompiledGraph[StateT],
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
+        *,
+        store: Optional[Any] = None,
+        stream_mode: str = "events",
     ) -> AsyncGenerator[StreamEvent, None]:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -653,6 +730,23 @@ class AsyncExecutor:
 
             state = new_state
             step += 1
+
+            # Streaming mode: filter/transform events
+            if stream_mode == "values":
+                yield StreamEvent(
+                    EventType.NODE_END, node=node_name, data=_dump(new_state), step=step, metadata={"mode": "values"}
+                )
+            elif stream_mode == "updates":
+                yield StreamEvent(
+                    EventType.STATE_UPDATE, node=node_name,
+                    data={"updates": updates}, step=step, metadata={"mode": "updates"}
+                )
+            elif stream_mode == "debug":
+                import time as _time
+                yield StreamEvent(
+                    EventType.NODE_END, node=node_name, data=_dump(new_state),
+                    step=step, metadata={"mode": "debug", "timestamp": _time.time(), "updates": list(updates.keys())}
+                )
 
             next_name = self._resolve_next(graph, node_name, state)
             if node_name in graph._conditionals:
@@ -747,6 +841,7 @@ class AsyncExecutor:
         *,
         updates: Optional[StateUpdate] = None,
         config: Optional[Dict[str, Any]] = None,
+        store: Optional[Any] = None,
     ) -> StateT:
         """Resume execution from the last checkpoint (async)."""
         checkpointer = graph.checkpointer or InMemoryCheckpointer()
@@ -811,6 +906,16 @@ class AsyncExecutor:
 # ===================================================================
 # Shared helpers
 # ===================================================================
+
+
+def _node_accepts_param(node: Any, param_name: str) -> bool:
+    """Check if a node's underlying function accepts the given parameter name."""
+    try:
+        fn = node.fn if hasattr(node, 'fn') else node
+        sig = inspect.signature(fn)
+        return param_name in sig.parameters
+    except (ValueError, TypeError):
+        return False
 
 
 def _dump(state: Any) -> Dict[str, Any]:

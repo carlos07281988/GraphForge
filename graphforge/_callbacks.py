@@ -148,7 +148,81 @@ class CallbackManager:
                 cb.on_conditional_edge(node, router_result, target)
 
 
+
+class TimingCallback:
+    """Callback that records execution timing per node.
+
+    Provides :meth:`get_stats` returning a dict of ``node_name -> timing_info``.
+
+    Usage::
+
+        from graphforge import CallbackManager
+        from graphforge._callbacks import TimingCallback
+
+        timer = TimingCallback()
+        cm = CallbackManager([timer])
+        graph.invoke(state, callbacks=cm)
+
+        for node, stats in timer.get_stats().items():
+            print(f"{node}: {stats['duration']:.3f}s")
+    """
+
+    def __init__(self) -> None:
+        self._node_times: Dict[str, Dict[str, float]] = {}
+        self._graph_start: Optional[float] = None
+        self._graph_name: str = ""
+        self._current_node: Optional[str] = None
+        self._current_start: Optional[float] = None
+
+    def on_graph_start(self, graph_name: str, input_state: Dict[str, Any]) -> None:
+        self._graph_name = graph_name
+        self._graph_start = __import__("time").time()
+
+    def on_graph_end(self, graph_name: str, final_state: Dict[str, Any]) -> None:
+        if self._graph_start is not None:
+            elapsed = __import__("time").time() - self._graph_start
+            self._node_times["_graph_total"] = {
+                "name": graph_name,
+                "duration": elapsed,
+            }
+
+    def on_node_start(self, node: str, state: Dict[str, Any]) -> None:
+        self._current_node = node
+        self._current_start = __import__("time").time()
+
+    def on_node_end(self, node: str, state: Dict[str, Any]) -> None:
+        if self._current_start is not None and self._current_node is not None:
+            elapsed = __import__("time").time() - self._current_start
+            if self._current_node not in self._node_times:
+                self._node_times[self._current_node] = {
+                    "name": self._current_node,
+                    "duration": 0.0,
+                    "calls": 0,
+                }
+            self._node_times[self._current_node]["duration"] += elapsed
+            self._node_times[self._current_node]["calls"] =                 self._node_times[self._current_node].get("calls", 0) + 1
+        self._current_node = None
+        self._current_start = None
+
+    def on_node_error(self, node: str, error: Exception) -> None:
+        self._current_node = None
+        self._current_start = None
+
+    def get_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Return recorded timing statistics."""
+        return dict(self._node_times)
+
+    def reset(self) -> None:
+        """Clear all recorded statistics."""
+        self._node_times.clear()
+        self._graph_start = None
+        self._graph_name = ""
+        self._current_node = None
+        self._current_start = None
+
+
 __all__ = [
     "Callback",
     "CallbackManager",
+    "TimingCallback",
 ]

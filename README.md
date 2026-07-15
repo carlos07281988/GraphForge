@@ -705,6 +705,142 @@ graph.add_node("parallel_process", mr)
 The map phase runs in parallel via ``ThreadPoolExecutor``; the reduce phase combines results.
 
 
+
+## `@tool` Decorator — Auto-Generated Tool Schemas
+
+The ``@tool`` decorator converts any Python function into a ``Tool`` with an
+auto-generated OpenAI-compatible ``ToolDef``, saving you from writing JSON Schema by hand.
+
+```python
+from graphforge.tools import tool
+
+@tool
+def search(query: str, max_results: int = 10) -> str:
+    """Search the web for information."""
+    return f"Results for {query} (limit: {max_results})"
+
+# Use directly
+result = search(query="hello", max_results=5)
+
+# Or with ToolNode
+from graphforge.agents import ToolNode
+graph.add_node("agent", ToolNode(llm, tools=[search.tool_def]))
+
+# Inspect the generated schema
+print(search.tool_def["function"]["parameters"])
+# -> {"type": "object", "properties": {"query": {"type": "string"}, ...}}
+```
+
+**Features**:
+- Auto-generates JSON Schema from Python type annotations
+- Extracts description from docstring
+- Supports optional parameters with defaults
+- Supports ``Annotated`` type for field descriptions
+
+---
+
+## Structured Output — Pydantic-Validated LLM Outputs
+
+Enforce that LLM outputs conform to a Pydantic model schema, with automatic
+retry on validation failure.
+
+```python
+from pydantic import BaseModel
+from graphforge.structured_output import with_structured_output
+
+class Weather(BaseModel):
+    city: str
+    temperature: float
+    conditions: str
+
+# Wrap any LLM callable
+llm = with_structured_output(my_llm_func, Weather, max_retries=3)
+
+# Returns validated Weather instance
+result = llm(messages)
+print(result.city, result.temperature)
+
+# Use as a graph node
+def weather_node(state):
+    weather = llm(state.messages)
+    return {"weather": weather.model_dump()}
+```
+
+**Design**:
+- Appends JSON schema prompt to force structured output
+- Parses both raw JSON and markdown-fenced code blocks
+- Retries on validation failure (configurable)
+- Full type preservation via generics
+
+---
+
+## Agent Evaluation — Test Agent Behavior
+
+Built-in evaluation framework for testing compiled graphs against expected outcomes:
+
+```python
+from graphforge.eval import evaluate, EvalCase, exact_match
+
+cases = [
+    EvalCase(
+        input={"messages": [{"role": "user", "content": "Hello"}]},
+        expected={"output": "Hi there!"},
+        metrics=[exact_match("output")],
+    ),
+]
+
+results = evaluate(compiled_graph, cases, state_type=ChatState)
+print(results.summary())  # "EvalResults: 3/4 passed (75.0%)"
+
+for failure in results.failures():
+    print(failure.case.name, failure.metric_results)
+```
+
+**Built-in metrics**: ``exact_match``, ``contains``, ``json_match``, or custom callables.
+
+---
+
+## TimingCallback — Node-Level Performance Stats
+
+Collect per-node execution timing without modifying node code:
+
+```python
+from graphforge._callbacks import TimingCallback, CallbackManager
+
+timer = TimingCallback()
+compiled.invoke(state, callbacks=CallbackManager([timer]))
+
+for node, stats in timer.get_stats().items():
+    print(f"{node}: {stats['duration']:.3f}s ({stats['calls']} calls)")
+```
+
+---
+
+## Cancellation API — Stop Running Graphs
+
+Cancel a long-running graph execution from another thread:
+
+```python
+import threading
+
+def run_in_thread(compiled, state):
+    result = compiled.invoke(state, config={"thread_id": "my-task"})
+    return result
+
+thread = threading.Thread(target=run_in_thread, args=(compiled, state))
+thread.start()
+
+# Cancel from main thread
+compiled.cancel("my-task")
+thread.join()
+```
+
+When cancelled, the graph saves a checkpoint of the current state before
+raising ``GraphExecutionPaused``.
+
+---
+
+
 ## Execution Modes
 
 ### Invoke

@@ -45,6 +45,23 @@ from graphforge._types import (
 )
 
 
+class On(str, Enum):
+    """Conflict resolution strategy for parallel branches."""
+
+    REPLACE = "replace"
+    """Last writer wins — later updates overwrite earlier ones (default)."""
+
+    APPEND = "append"
+    """List fields are concatenated; non-list fields fall back to REPLACE."""
+
+    IGNORE = "ignore"
+    """First writer wins — subsequent updates to the same field are dropped."""
+
+    ERROR = "error"
+    """Raise if multiple branches update the same field."""
+
+
+
 # ---------------------------------------------------------------------------
 # Edge type discriminator
 # ---------------------------------------------------------------------------
@@ -130,19 +147,22 @@ class ConditionalEdge(Generic[StateT]):
 class FanOutEdge(Generic[StateT]):
     """A fan-out edge that spawns multiple parallel branches."""
 
-    __slots__ = ("source", "targets", "join")
+    __slots__ = ("source", "targets", "join", "conflict")
 
     def __init__(
         self,
         source: NodeName,
         targets: List[NodeName],
         join: Optional[NodeName] = None,
+        *,
+        conflict: Optional[Union[On, str]] = None,
     ) -> None:
         assert source, "source must be a non-empty string"
         assert targets, "targets must be a non-empty list"
         self.source = source
         self.targets = list(targets)
         self.join = join
+        self.conflict = On(conflict) if isinstance(conflict, str) else conflict
 
     def __repr__(self) -> str:
         return (
@@ -159,5 +179,6 @@ __all__ = [
     "DirectEdge",
     "EdgeKind",
     "FanOutEdge",
+    "On",
     "AnyEdge",
 ]

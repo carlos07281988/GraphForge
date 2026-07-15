@@ -625,6 +625,53 @@ Design decisions:
 - ``InputGuardian`` / ``OutputGuardian`` containers
 
 ### 12.5 MapReduce
+### 12.6 Tool Decorator (tools.py)
+
+The ``@tool`` decorator auto-generates OpenAI-compatible ToolDef schemas from
+Python function type annotations and docstrings. Eliminates the need to write
+JSON Schema by hand when defining tools.
+
+### 12.7 Structured Output (structured_output.py)
+
+Wraps any LLM callable to return validated Pydantic model instances, with
+automatic retry on validation failure. Uses JSON mode prompting and extracts
+structured data from markdown code blocks.
+
+### 12.8 Agent Evaluation (eval.py)
+
+Built-in evaluation framework for testing compiled graphs against expected
+outcomes. Provides ``EvalCase``, ``evaluate()``, and built-in metrics
+(``exact_match``, ``contains``, ``json_match``).
+
+### 12.9 Cancellation API
+
+Cross-thread graph cancellation via ``CompiledGraph.cancel(thread_id)``.
+Uses ``threading.Event`` for signalling. Saves a checkpoint before raising.
+
+### 12.10 TimingCallback
+
+Collects per-node execution timing via the existing callback system.
+Provides ``TimingCallback.get_stats()`` for node-level duration/calls data.
+
+### 12.11 add_sequence / add_parallel
+
+High-level graph construction APIs added to the ``Graph`` builder:
+- ``add_sequence([a, b, c])`` — linear chain (calls ``add_edge`` between pairs)
+- ``add_parallel(source, [a, b], join=j)`` — parallel fan-out (wraps ``add_fanout``)
+
+### 12.12 Streaming Modes
+
+The ``stream()`` method now accepts a ``stream_mode`` parameter:
+- ``"events"`` (default) — current StreamEvent format (backward compatible)
+- ``"values"`` — full state after each node
+- ``"updates"`` — only the updates dict
+- ``"debug"`` — full event metadata with timing
+
+### 12.13 Postgres Checkpointer
+
+Production-grade checkpointing via PostgreSQL (``_checkpoint_postgres.py``).
+Uses ``psycopg2`` connection pool, JSONB columns, and parameterized queries.
+
 
 The ``_map_reduce.py`` module provides parallel list processing as a first-class
 graph node.

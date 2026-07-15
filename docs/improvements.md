@@ -271,6 +271,210 @@ agent memory, independent of checkpoint state.
 
 ---
 
+## 2026-07-16 — v0.2.0 Feature Implementation
+
+**What**: Systematic implementation of features identified in the Gap Analysis.
+All P0 and P1 features implemented across runtime, persistence, streaming,
+tool integration, and developer experience.
+
+---
+
+## 2026-07-16 — Store Injection into Executor
+
+**What**: `Store` is now accessible from within graph nodes via a new
+``store`` parameter in the node function signature, or via callback.
+
+**Changes**:
+- ``graphforge/_executor.py`` — ``SyncExecutor.execute()`` now accepts a
+  ``store`` parameter and injects it into node invocations that declare a
+  ``store`` keyword argument.
+- ``graphforge/_graph.py`` — ``CompiledGraph.invoke()`` / ``ainvoke()`` /
+  ``stream()`` / ``astream()`` now accept an optional ``store`` parameter.
+
+**Design**:
+- Nodes opt in via function signature: ``def my_node(state, store): ...``
+- Executor inspects node function signature and passes store if accepted
+- Backward compatible — existing nodes without ``store`` param unaffected
+
+**Tests**: 5 tests (store injection, store in streaming, async, no-store node)
+
+---
+
+## 2026-07-16 — Postgres Checkpointer
+
+**What**: Production-grade checkpointing backend using PostgreSQL.
+
+**Changes**:
+- ``graphforge/_checkpoint_postgres.py`` — ``PostgresCheckpointer``
+  implementing the ``Checkpointer`` ABC with full CRUD and metadata support.
+- Uses ``psycopg2`` (sync) and ``asyncpg`` (async) drivers.
+
+**Design**:
+- Connection pool management (``psycopg2.pool.ThreadedConnectionPool``)
+- JSONB for state and metadata columns
+- Parameterized queries, no SQL injection surface
+- Table auto-creation on first use
+
+**Tests**: 10 tests (CRUD, list, clear, metadata, error handling)
+
+---
+
+## 2026-07-16 — add_sequence / add_parallel High-Level API
+
+**What**: Declarative graph construction APIs for common patterns.
+
+**Changes**:
+- ``graphforge/_graph.py`` — ``Graph.add_sequence()`` chains multiple nodes
+  in series (internally creates sequential edges).
+- ``graphforge/_graph.py`` — ``Graph.add_parallel()`` fans out to multiple
+  nodes in parallel with optional join.
+
+**Design**:
+- Internally calls existing ``add_node()`` / ``add_edge()`` / ``add_fanout()``
+- ``add_sequence([a, b, c])`` = ``add_edge(a,b)`` + ``add_edge(b,c)``
+- ``add_parallel([a, b], join=j)`` = ``add_fanout(source, [a,b], join=j)``
+- Returns ``self`` for fluent chaining
+
+**Tests**: 8 tests (basic sequence, parallel, join, mixed, nested)
+
+---
+
+## 2026-07-16 — Streaming Modes (values / updates / debug)
+
+**What**: Multiple streaming modes letting consumers choose data granularity.
+
+**Changes**:
+- ``graphforge/_stream.py`` — added ``StreamMode`` enum with VALUES,
+  UPDATES, DEBUG, EVENTS modes
+- ``graphforge/_executor.py`` — executor emits per-mode streams
+- ``graphforge/_graph.py`` — ``CompiledGraph.stream()`` accepts
+  ``stream_mode`` parameter
+
+**Design**:
+- ``values``: full state after each node
+- ``updates``: only the updates dict from each node
+- ``debug``: full event metadata including timing and node metadata
+- ``events``: same as current ``StreamEvent`` (default, backward compat)
+
+**Tests**: 8 tests (each mode, mode switching, default backward compat)
+
+---
+
+## 2026-07-16 — @tool Decorator
+
+**What**: Python decorator that auto-generates OpenAI-compatible ToolDef
+from any function with type annotations and docstrings.
+
+**Changes**:
+- ``graphforge/tools.py`` — new module with ``@tool`` decorator and
+  ``Tool`` descriptor class
+
+**Design**:
+- Inspects function signature → JSON Schema (using Pydantic/Python types)
+- Extracts description from docstring
+- Supports args with defaults, type hints, and ``Annotated`` metadata
+- Returns GraphForge-compatible ``ToolDef`` dict
+
+**Tests**: 10 tests (basic tool, typed args, docstring, async, schema gen)
+
+---
+
+## 2026-07-16 — Structured Output
+
+**What**: Utility to enforce LLM outputs conform to a Pydantic model schema,
+with retry and validation.
+
+**Changes**:
+- ``graphforge/structured_output.py`` — ``with_structured_output()``
+  wrapper and ``StructuredOutputNode`` class
+
+**Design**:
+- ``with_structured_output(llm_func, schema)`` wraps any LLM callable to
+  return validated Pydantic instances
+- JSON mode support (prompt-based or API-level)
+- Auto-retry on validation failure (up to configurable attempts)
+- Full type preservation via generics
+
+**Tests**: 8 tests
+
+---
+
+## 2026-07-16 — Parallel Branch Conflict Strategy
+
+**What**: Configurable conflict resolution for parallel branches updating
+the same state field.
+
+**Changes**:
+- ``graphforge/_edge.py`` — ``FanOutEdge.conflict`` parameter using new
+  ``On`` enum (REPLACE, APPEND, IGNORE, ERROR)
+- ``graphforge/_executor.py`` — ``_merge_parallel_results()`` respects
+  per-field conflict strategies
+
+**Design**:
+- ``On.REPLACE``: last writer wins (default, current behavior)
+- ``On.APPEND``: list fields are concatenated
+- ``On.IGNORE``: first writer wins, subsequent updates dropped
+- ``On.ERROR``: raise if conflict detected
+- Can be set per-field via ``node_field(conflict=...)``
+
+**Tests**: 8 tests
+
+---
+
+## 2026-07-16 — Cancellation API
+
+**What**: Cancel a running graph execution from another thread.
+
+**Changes**:
+- ``graphforge/_executor.py`` — ``CancellationToken`` support
+- ``graphforge/_graph.py`` — ``CompiledGraph.cancel(thread_id)``
+
+**Design**:
+- ``CancellationToken`` checked between node invocations
+- Uses threading ``Event`` for cross-thread signalling
+- Cleanup: checkpoint current state before raising ``GraphCancelled``
+
+**Tests**: 4 tests
+
+---
+
+## 2026-07-16 — Node-level Timing / Token Statistics
+
+**What**: Per-node execution statistics collected via callback.
+
+**Changes**:
+- ``graphforge/_callbacks.py`` — ``TimingCallback`` implementation
+
+**Design**:
+- Records wall-clock time per node
+- Exposes ``StatsCallback.get_stats()`` returning dict of node->timing
+- Compatible with existing callback system
+
+**Tests**: 4 tests
+
+---
+
+## 2026-07-16 — Agent Evaluation Framework
+
+**What**: Lightweight built-in evaluation for testing agent behavior.
+
+**Changes**:
+- ``graphforge/eval.py`` — new module with ``EvalCase``, ``evaluate()``
+  function, and built-in metrics
+
+**Design**:
+- ``EvalCase(input, expected, metrics)`` — test case definition
+- ``evaluate(graph, cases, state_type)`` — run evaluation
+- Built-in metrics: exact_match, contains, json_match, custom callable
+- Returns ``EvalResults`` with pass/fail per case
+
+**Tests**: 8 tests
+
+---
+
+
+---
+
 ## Design Principles Applied
 
 Throughout these improvements, the following principles guided the work:

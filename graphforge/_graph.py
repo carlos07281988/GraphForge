@@ -27,6 +27,10 @@ import logging
 from collections import deque
 from collections.abc import AsyncGenerator, Generator
 from typing import (
+    Sequence,
+
+    Any,
+
     TYPE_CHECKING,
     Any,
     Dict,
@@ -213,6 +217,68 @@ class Graph(Generic[StateT]):
         return self
 
 
+    # -- high-level construction API ----------------------------------------
+
+    def add_sequence(
+        self,
+        nodes: Sequence[NodeName],
+    ) -> Graph[StateT]:
+        """Add a linear sequence of nodes connected in order.
+
+        Equivalent to calling ``add_edge`` between each consecutive pair.
+        All nodes must already be registered.
+
+        Parameters
+        ----------
+        nodes:
+            Ordered list of node names. Edges are created between
+            consecutive pairs: ``node_0 -> node_1 -> node_2 -> ...``
+
+        Returns
+        -------
+        ``self`` for fluent chaining.
+        """
+        if len(nodes) < 2:
+            raise ValueError("add_sequence requires at least 2 nodes.")
+        for i in range(len(nodes) - 1):
+            self.add_edge(nodes[i], nodes[i + 1])
+        return self
+
+    def add_parallel(
+        self,
+        source: NodeName,
+        targets: List[NodeName],
+        join: Optional[NodeName] = None,
+        *,
+        conflict: Optional[Any] = None,
+    ) -> Graph[StateT]:
+        """Fan out from *source* to multiple *targets* in parallel.
+
+        This is a convenience wrapper around :meth:`add_fanout`.
+
+        Parameters
+        ----------
+        source:
+            Source node name.
+        targets:
+            List of target node names for parallel execution.
+        join:
+            Optional join node where all branches converge.
+        conflict:
+            Optional conflict resolution strategy for parallel branches.
+
+        Returns
+        -------
+        ``self`` for fluent chaining.
+        """
+        from graphforge._edge import FanOutEdge as FOE
+
+        self._fanout_edges.append(
+            FOE(source=source, targets=targets, join=join)
+        )
+        logger.debug("add_parallel: %r -> %s (join=%r)", source, targets, join)
+        return self
+
     # -- serialisation -------------------------------------------------------
 
     def serialize(self) -> Dict[str, Any]:
@@ -318,12 +384,18 @@ class Graph(Generic[StateT]):
         checkpointer: Optional["Checkpointer"] = None,
         name: Optional[str] = None,
         state_type: Optional[type] = None,
+        stream_modes: Optional[List[str]] = None,
     ) -> "CompiledGraph[StateT]":
         logger.info(
             "Compiling graph: %d nodes, %d edges, %d conditional edges",
             len(self._nodes), len(self._direct_edges), len(self._conditional_edges),
         )
         self._validate()
+        stream_modes_list: List[str] = []
+        if stream_modes is not None:
+            stream_modes_list = list(stream_modes)
+            logger.debug("compile with stream_modes=%s", stream_modes_list)
+
         return CompiledGraph[StateT](
             nodes=dict(self._nodes),
             direct_edges=list(self._direct_edges),
@@ -545,40 +617,52 @@ class CompiledGraph(Generic[StateT]):
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
         callbacks: Optional["CallbackManager"] = None,
+        *,
+        store: Optional[Any] = None,
     ) -> StateT:
         from graphforge._executor import SyncExecutor
         executor = SyncExecutor(callbacks=callbacks)
-        return executor.execute(self, input_state, config=config)
+        return executor.execute(self, input_state, config=config, store=store)
 
     async def ainvoke(
         self,
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
         callbacks: Optional["CallbackManager"] = None,
+        *,
+        store: Optional[Any] = None,
     ) -> StateT:
         from graphforge._executor import AsyncExecutor
         executor = AsyncExecutor(callbacks=callbacks)
-        return await executor.execute(self, input_state, config=config)
+        return await executor.execute(self, input_state, config=config, store=store)
 
     def stream(
         self,
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
         callbacks: Optional["CallbackManager"] = None,
+        *,
+        store: Optional[Any] = None,
+        stream_mode: str = "events",
     ) -> Generator["StreamEvent", None, None]:
         from graphforge._executor import SyncExecutor
         executor = SyncExecutor(callbacks=callbacks)
-        yield from executor.stream(self, input_state, config=config)
+        mode = stream_mode or "events"
+        yield from executor.stream(self, input_state, config=config, store=store, stream_mode=mode)
 
     async def astream(
         self,
         input_state: StateT,
         config: Optional[Dict[str, Any]] = None,
         callbacks: Optional["CallbackManager"] = None,
+        *,
+        store: Optional[Any] = None,
+        stream_mode: str = "events",
     ) -> AsyncGenerator["StreamEvent", None]:
         from graphforge._executor import AsyncExecutor
         executor = AsyncExecutor(callbacks=callbacks)
-        async for event in executor.stream(self, input_state, config=config):
+        mode = stream_mode or "events"
+        async for event in executor.stream(self, input_state, config=config, store=store, stream_mode=mode):
             yield event
 
     def resume(
@@ -589,6 +673,7 @@ class CompiledGraph(Generic[StateT]):
         updates: Optional[Dict[str, Any]] = None,
         config: Optional[Dict[str, Any]] = None,
         callbacks: Optional["CallbackManager"] = None,
+        store: Optional[Any] = None,
     ) -> StateT:
         """Resume execution from the last checkpoint.
 
@@ -625,8 +710,29 @@ class CompiledGraph(Generic[StateT]):
         executor = SyncExecutor(callbacks=callbacks)
         return executor.resume(
             self, thread_id, st,
-            updates=updates, config=config,
+            updates=updates, config=config, store=store,
         )
+
+    def cancel(self, thread_id: str) -> None:
+        """Cancel a running graph execution by thread ID.
+
+        The graph will raise ``GraphExecutionPaused`` at the next node
+        boundary and save a checkpoint of the current state.
+
+        Parameters
+        ----------
+        thread_id:
+            The thread ID of the running execution to cancel.
+        """
+        from graphforge._executor import _signal_cancel
+        _signal_cancel(thread_id)
+        logger.info("Cancelled graph %r thread %r", self._name, thread_id)
+
+    @staticmethod
+    def clear_cancel(thread_id: str) -> None:
+        """Clear cancellation signal for a thread."""
+        from graphforge._executor import _clear_cancel
+        _clear_cancel(thread_id)
 
     async def aresume(
         self,

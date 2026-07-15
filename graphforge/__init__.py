@@ -32,7 +32,7 @@ from graphforge._types import (
 )
 from graphforge._graph import CompiledGraph, Graph
 from graphforge._node import Node, NodeKind
-from graphforge._stream import EventType, StreamEvent
+from graphforge._stream import EventType, StreamEvent, StreamMode
 from graphforge._checkpoint import (
     Checkpoint,
     Checkpointer,
@@ -41,6 +41,7 @@ from graphforge._checkpoint import (
 )
 from graphforge._checkpoint_sqlite import SqliteCheckpointer
 from graphforge._checkpoint_redis import RedisCheckpointer
+from graphforge._checkpoint_postgres import PostgresCheckpointer
 from graphforge._command import Command
 from graphforge._interrupt import interrupt
 from graphforge._mermaid import export_mermaid
@@ -54,8 +55,28 @@ from graphforge._visualize import export_dot, render_graph
 from graphforge._logging import configure_logging, get_logger
 from graphforge.pipeline import Pipeline
 from graphforge.state import Append, GraphState, MergeStrategy, node_field
+from graphforge.structured_output import with_structured_output, StructuredOutputWrapper
+from graphforge.tools import Tool, tool
 # Guardrails
 from graphforge.guardrails import (
+    Guardrail,
+    GuardrailAction,
+    GuardrailError,
+    GuardrailResult,
+    FieldLengthGuardrail,
+    InputGuardian,
+    OutputGuardian,
+)
+from graphforge.eval import (
+    EvalCase,
+    EvalResults,
+    evaluate,
+    exact_match,
+    contains,
+    json_match,
+)
+from graphforge.guardrails import (
+
     Guardrail,
     GuardrailAction,
     GuardrailError,
@@ -151,6 +172,21 @@ __version_info__ = (0, 1, 0)
 __author__ = "GraphForge Contributors"
 __license__ = "Apache 2.0"
 __description__ = __doc__.splitlines()[0].lstrip()
+
+__all__.extend([
+    "StreamMode",
+    "with_structured_output",
+    "StructuredOutputWrapper",
+    "Tool",
+    "tool",
+    "EvalCase",
+    "EvalResults",
+    "evaluate",
+    "exact_match",
+    "contains",
+    "json_match",
+    "PostgresCheckpointer",
+])
 __all__.sort()
 __all__.extend(["__version__", "__version_info__",
     "GraphExecutionPaused", "SqliteCheckpointer"])
