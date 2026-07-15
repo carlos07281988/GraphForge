@@ -1033,22 +1033,26 @@ compiled.invoke(state, callbacks=manager)
 | `add_edge(source, target)` | `Self` | Unconditional edge |
 | `add_error_edge(source, fallback)` | `Self` | Route to fallback node on error |
 | `add_conditional_edges(source, router, path_map)` | `Self` | Conditional routing |
-| `add_fanout(source, targets, join=None)` | `Self` | Parallel fan-out execution |
+| `add_fanout(source, targets, join=None, *, conflict=None)` | `Self` | Parallel fan-out with optional conflict strategy |
+| `add_sequence([a, b, c])` | `Self` | Linear chain of nodes (sequential edges) |
+| `add_parallel(source, [a, b], join=j, *, conflict=None)` | `Self` | Parallel fan-out from source to targets |
 | `set_entry_point(name)` | `Self` | Define start node |
 | `set_finish_point(name)` | `Self` | Define terminal node |
 | `set_metadata(key, value)` | `Self` | Attach metadata |
-| `compile(*, input_map=None, output_map=None, checkpointer=None, name=None, state_type=None)` | `CompiledGraph` | Freeze and validate |
+| `compile(*, input_map=None, output_map=None, checkpointer=None, name=None, state_type=None, stream_modes=None)` | `CompiledGraph` | Freeze and validate |
 
 ### `CompiledGraph[StateT]`
 
 | Method | Returns | Description |
 |---|---|---|
-| `invoke(state, config=None, callbacks=None)` | `StateT` | Sync execution |
-| `ainvoke(state, config=None, callbacks=None)` | `StateT` | Async execution |
-| `stream(state, config=None, callbacks=None)` | `Generator[StreamEvent]` | Sync streaming |
-| `astream(state, config=None, callbacks=None)` | `AsyncGenerator[StreamEvent]` | Async streaming |
-| `resume(thread_id, state_type=None, updates=None, config=None, callbacks=None)` | `StateT` | Resume from last checkpoint |
-| `aresume(thread_id, state_type=None, updates=None, config=None, callbacks=None)` | `StateT` | Async resume |
+| `invoke(state, config=None, callbacks=None, *, store=None)` | `StateT` | Sync execution with optional store |
+| `ainvoke(state, config=None, callbacks=None, *, store=None)` | `StateT` | Async execution with optional store |
+| `stream(state, config=None, callbacks=None, *, store=None, stream_mode="events")` | `Generator[StreamEvent]` | Sync streaming (modes: events/values/updates/debug) |
+| `astream(state, config=None, callbacks=None, *, store=None, stream_mode="events")` | `AsyncGenerator[StreamEvent]` | Async streaming |
+| `resume(thread_id, state_type=None, updates=None, config=None, callbacks=None, *, store=None)` | `StateT` | Resume from last checkpoint |
+| `aresume(thread_id, state_type=None, updates=None, config=None, callbacks=None, *, store=None)` | `StateT` | Async resume |
+| `cancel(thread_id)` | `None` | Cancel a running execution |
+| `clear_cancel(thread_id)` | `None` | Clear cancellation signal |
 | Properties: `name`, `nodes`, `entry_point`, `finish_points`, `checkpointer`, `metadata`, `state_type`, `input_map`, `output_map`, `error_map` |  | Read-only |
 
 ### `GraphState`
@@ -1075,6 +1079,9 @@ compiled.invoke(state, callbacks=manager)
 | `ToolNode(llm_func, tools, state_messages_field="messages")` | Create a tool-calling agent node |
 | `has_tool_calls(state, field="messages")` | Conditional router: returns `"tools"` or `"end"` |
 | `create_react_agent(llm_func, tools, state_type=None)` | Build a ReAct agent graph |
+| `create_supervisor_worker(supervisor_fn, workers, max_iterations=10)` | Supervisor/Worker pattern |
+| `create_swarm(agents, router_fn)` | Swarm pattern |
+| `create_delegation_agent(orchestrator_fn, sub_agents)` | Delegation pattern |
 
 ### Edge Types
 
@@ -1113,11 +1120,18 @@ compiled.invoke(state, callbacks=manager)
 Graph, CompiledGraph, Node, NodeKind,
 GraphState, Append, MergeStrategy, node_field,
 Pipeline,
-EventType, StreamEvent,
+EventType, StreamEvent, StreamMode,
 Checkpoint, Checkpointer, CheckpointKey, InMemoryCheckpointer,
-SqliteCheckpointer, RedisCheckpointer,
+SqliteCheckpointer, RedisCheckpointer, PostgresCheckpointer,
 GraphExecutionPaused,
-Callback, CallbackManager,
+Callback, CallbackManager, TimingCallback,
+Store, InMemoryStore, RedisStore,
+Guardrail, GuardrailAction, GuardrailError, GuardrailResult,
+InputGuardian, OutputGuardian, FieldLengthGuardrail,
+MapReduce,
+Tool, tool, StructuredOutputWrapper, with_structured_output,
+EvalCase, EvalResults, evaluate, exact_match, contains, json_match,
+MCPClient, MCPAgentServer, mcp_tools_to_tool_defs,
 configure_logging, get_logger,
 export_dot, render_graph,
 NodeFunc, AsyncNodeFunc, RouterFunc, AsyncRouterFunc,
@@ -1152,13 +1166,21 @@ Topics covered:
 | State model | TypedDict + magic `__reducers__` | Pydantic v2 with explicit `node_field(merge=...)` |
 | Type safety | Weak (TypedDict is runtime-fragile) | Full generics, Protocols, static analysis |
 | Immutability | Mutable state in place | Each step = new snapshot with `model_copy` |
-| Graph composition | Channels-based internals | Subgraphs and Pipelines as first-class nodes |
-| Streaming | Opaque channel events | Per-step `StreamEvent` objects |
+| Graph composition | Channels-based internals | Subgraphs, Pipelines, add_sequence/add_parallel |
+| Streaming | Opaque channel events | Per-step `StreamEvent` + values/updates/debug modes |
 | Async support | Async API exists | Native sync+async from day 1 |
-| Checkpointing | `BaseCheckpointSaver` | `Checkpointer` ABC with in-memory default |
-| Callbacks | None | `Callback` Protocol + `CallbackManager` |
+| Checkpointing | `BaseCheckpointSaver` | `Checkpointer` ABC + InMemory/SQLite/Redis/Postgres |
+| Callbacks | None | `Callback` Protocol + `CallbackManager` + `TimingCallback` |
+| MCP | Native MCP tool integration | `MCPClient` + `MCPAgentServer` |
+| Store / Memory | `BaseStore` cross-thread KV | `Store` ABC + `InMemoryStore` + `RedisStore` |
+| Guardrails | Built-in guardrails | `InputGuardian` + `OutputGuardian` + custom `Guardrail` |
+| Multi-Agent | Supervisor, Swarm, Map-Reduce | Supervisor/Worker, Swarm, Delegation, ReAct |
+| Tool definitions | `@tool` decorator | `@tool` decorator + auto JSON Schema |
+| Structured Output | `with_structured_output` | `with_structured_output` + retry + validation |
+| Cancellation | Task cancellation | `cancel(thread_id)` via threading.Event |
+| Agent Evaluation | LangSmith integration | Built-in `EvalCase` + `evaluate()` + metrics |
 | Dependencies | langchain-core, pydantic, many more | Pydantic v2, typing_extensions only |
-| Error handling | Let unhandled propagate | Log + dispatch to callbacks + re-raise |
+| Error handling | Let unhandled propagate | Log + dispatch + retry + error edges |
 
 ---
 
