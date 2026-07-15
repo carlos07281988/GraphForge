@@ -221,8 +221,141 @@ class TimingCallback:
         self._current_start = None
 
 
+
+# ---------------------------------------------------------------------------
+# CostCallback — token usage and cost tracking
+# ---------------------------------------------------------------------------
+
+# Default pricing: (input_price_per_1k, output_price_per_1k) in USD
+_DEFAULT_PRICING = {
+    "gpt-4": (0.03, 0.06),
+    "gpt-4-turbo": (0.01, 0.03),
+    "gpt-4o": (0.01, 0.03),
+    "gpt-4o-mini": (0.00015, 0.0006),
+    "gpt-3.5-turbo": (0.0015, 0.002),
+    "claude-3-opus": (0.015, 0.075),
+    "claude-3-sonnet": (0.003, 0.015),
+    "claude-3-haiku": (0.00025, 0.00125),
+    "claude-3.5-sonnet": (0.003, 0.015),
+    "default": (0.01, 0.03),
+}
+
+
+class CostCallback:
+    """Callback that tracks token usage and estimated costs per node.
+
+    Usage::
+
+        from graphforge import CallbackManager
+        from graphforge._callbacks import CostCallback
+
+        cost = CostCallback()
+        cm = CallbackManager([cost])
+        compiled.invoke(state, callbacks=cm)
+
+        print(f"Total cost: ${cost.total_cost():.4f}")
+        for node, info in cost.get_stats().items():
+            print(f"  {node}: {info['cost']:.4f}")
+    """
+
+    def __init__(self) -> None:
+        self._node_costs: Dict[str, Dict[str, float]] = {}
+        self._pricing: Dict[str, tuple] = dict(_DEFAULT_PRICING)
+        self._current_node: Optional[str] = None
+
+    def set_pricing(
+        self, model: str, input_price: float, output_price: float
+    ) -> None:
+        """Set custom pricing for a model.
+
+        Parameters
+        ----------
+        model:
+            Model name.
+        input_price:
+            Price per 1K input tokens (USD).
+        output_price:
+            Price per 1K output tokens (USD).
+        """
+        self._pricing[model] = (input_price, output_price)
+
+    def track(
+        self,
+        model: str,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        *,
+        node: Optional[str] = None,
+    ) -> None:
+        """Record token usage for a model.
+
+        Parameters
+        ----------
+        model:
+            Model name (e.g. ``"gpt-4"``).
+        prompt_tokens:
+            Number of prompt tokens.
+        completion_tokens:
+            Number of completion tokens.
+        node:
+            Node name (defaults to current node from callbacks).
+        """
+        node_name = node or self._current_node or "_unknown"
+        prices = self._pricing.get(model, self._pricing["default"])
+        input_cost = (prompt_tokens / 1000) * prices[0]
+        output_cost = (completion_tokens / 1000) * prices[1]
+
+        if node_name not in self._node_costs:
+            self._node_costs[node_name] = {
+                "total_tokens": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "cost": 0.0,
+                "models": {},
+            }
+
+        stats = self._node_costs[node_name]
+        stats["prompt_tokens"] += prompt_tokens
+        stats["completion_tokens"] += completion_tokens
+        stats["total_tokens"] += prompt_tokens + completion_tokens
+        stats["cost"] += input_cost + output_cost
+
+        if model not in stats["models"]:
+            stats["models"][model] = {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0}
+        stats["models"][model]["calls"] += 1
+        stats["models"][model]["prompt_tokens"] += prompt_tokens
+        stats["models"][model]["completion_tokens"] += completion_tokens
+
+    def get_stats(self) -> Dict[str, Dict[str, Any]]:
+        """Return cost statistics per node."""
+        return dict(self._node_costs)
+
+    def total_cost(self) -> float:
+        """Return total cost across all nodes."""
+        return sum(s["cost"] for s in self._node_costs.values())
+
+    def total_tokens(self) -> int:
+        """Return total tokens across all nodes."""
+        return sum(s["total_tokens"] for s in self._node_costs.values())
+
+    def reset(self) -> None:
+        """Clear all recorded statistics."""
+        self._node_costs.clear()
+
+    # Callback hooks
+    def on_node_start(self, node: str, state: Dict[str, Any]) -> None:
+        self._current_node = node
+
+    def on_node_end(self, node: str, state: Dict[str, Any]) -> None:
+        self._current_node = None
+
+    def on_node_error(self, node: str, error: Exception) -> None:
+        self._current_node = None
+
+
 __all__ = [
     "Callback",
     "CallbackManager",
     "TimingCallback",
+    "CostCallback",
 ]

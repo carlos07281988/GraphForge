@@ -971,6 +971,110 @@ compiled.invoke(state, callbacks=CallbackManager([], middleware=pipeline))
 
 
 
+## RAG (Retrieval-Augmented Generation)
+
+Built-in module for knowledge retrieval with embeddings, vector stores, and
+retrieval nodes.
+
+```python
+from graphforge.rag import InMemoryVectorStore, RetrievalNode, chunk_text
+from graphforge.rag._embeddings import DeterministicEmbeddings
+
+# Create embeddings and vector store
+embeddings = DeterministicEmbeddings(dimension=128)
+store = InMemoryVectorStore(embeddings)
+
+# Add documents (auto-chunked and embedded)
+store.add_texts([
+    "Paris is the capital of France",
+    "Python is a programming language",
+])
+
+# Use in graph as retrieval node
+graph.add_node("retrieve", RetrievalNode(store, query_field="question"))
+
+# Custom embeddings for production
+# from graphforge.rag import OpenAIEmbeddings
+# embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+```
+
+**Chunking utilities** for splitting text before embedding:
+
+```python
+from graphforge.rag import chunk_text, ChunkingStrategy
+
+chunks = chunk_text(long_text, strategy="recursive", chunk_size=500)
+```
+
+---
+
+## Cost / Token Tracking
+
+Track token usage and estimated costs per node via the callback system:
+
+```python
+from graphforge import CallbackManager
+from graphforge._callbacks import CostCallback
+
+cost = CostCallback()
+cm = CallbackManager([cost])
+compiled.invoke(state, callbacks=cm)
+
+print(f"Total cost: ${cost.total_cost():.4f}")
+print(f"Total tokens: {cost.total_tokens()}")
+
+for node, stats in cost.get_stats().items():
+    print(f"{node}: {stats['cost']:.4f} ({stats['total_tokens']} tokens)")
+
+# Custom pricing
+cost.set_pricing("my-model", input_price=0.01, output_price=0.03)
+
+# Track usage manually
+cost.track("gpt-4", prompt_tokens=100, completion_tokens=50, node="llm_call")
+```
+
+**Built-in pricing** for GPT-4, GPT-4o, GPT-4o-mini, GPT-3.5, Claude 3 models.
+
+---
+
+## Human-in-the-Loop Approval Patterns
+
+The ``interrupt()`` function now supports configurable timeouts:
+
+```python
+from graphforge import interrupt
+
+def review_node(state):
+    response = interrupt(
+        message="Approve this action?",
+        value={"action": "send_email"},
+        timeout=3600,       # 1 hour timeout
+        on_timeout="reject",  # auto-reject on timeout
+    )
+    # Resume with updates={"decision": "approve"}
+    return {"approved": response.get("decision") == "approve"}
+```
+
+**ApprovalNode** wraps any function with an approval gate:
+
+```python
+from graphforge.agents import ApprovalNode
+
+def send_email(state):
+    # Send email logic
+    return {"sent": True}
+
+# Wrapped: pauses for human approval before executing
+graph.add_node("send_email", ApprovalNode(send_email, timeout=300))
+```
+
+When interrupted, the graph saves a checkpoint. Resume with
+``compiled.resume(thread_id, updates={"decision": "approve"})``.
+
+---
+
+
+
 ## Execution Modes
 
 ### Invoke

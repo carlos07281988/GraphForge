@@ -90,6 +90,13 @@ from graphforge.store import Store, InMemoryStore
 from graphforge.store_redis import RedisStore
 # MapReduce
 from graphforge._map_reduce import MapReduce
+from graphforge.rag import (
+    Embeddings,
+    VectorStore,
+    InMemoryVectorStore,
+    RetrievalNode,
+    chunk_text,
+)
 from graphforge.background import BackgroundTaskRunner, BackgroundTask, TaskStatus
 
 

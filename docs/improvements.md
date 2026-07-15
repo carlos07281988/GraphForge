@@ -651,6 +651,86 @@ global interceptors for logging, validation, and transformation.
 
 ---
 
+## 2026-07-16 — v0.4.0 Feature Implementation
+
+**What**: Final round of feature implementation focused on three P0 capabilities:
+Embeddings/Vector Search/RAG, Cost/Token tracking, and Human-in-the-loop
+approval patterns.
+
+---
+
+## 2026-07-16 — Embeddings / Vector Search / RAG Module
+
+**What**: Added a complete RAG (Retrieval-Augmented Generation) module enabling
+agents to retrieve knowledge from vector databases.
+
+**Changes**:
+- ``graphforge/rag/`` — new module with ``Embeddings`` ABC, ``VectorStore`` ABC,
+  ``InMemoryVectorStore``, ``RetrievalNode``, and chunking utilities.
+- ``graphforge/rag/_embeddings.py`` — ``Embeddings`` abstract base class
+- ``graphforge/rag/_store.py`` — ``VectorStore`` ABC + ``InMemoryVectorStore``
+- ``graphforge/rag/_node.py`` — ``RetrievalNode`` for use in graphs
+- ``graphforge/rag/_chunking.py`` — Text chunking utilities
+- ``graphforge/rag/__init__.py`` — public API
+
+**Design**:
+- ``Embeddings`` ABC with ``embed_documents()`` and ``embed_query()`` methods
+- ``VectorStore`` ABC with ``add_texts()``, ``similarity_search()``
+- ``InMemoryVectorStore`` uses cosine similarity with numpy
+- ``RetrievalNode`` is a first-class graph node that retrieves context into state
+- Chunking supports fixed-size, recursive, and sentence-based strategies
+
+**Tests**: 15 tests
+
+---
+
+## 2026-07-16 — Cost / Token Tracking
+
+**What**: Built-in token usage and cost tracking via the callback system.
+
+**Changes**:
+- ``graphforge/_callbacks.py`` — Added ``CostCallback`` that tracks per-node
+  token usage and computes costs based on model pricing tables.
+- ``CostCallback.track(model, prompt_tokens, completion_tokens)`` API
+- Built-in pricing table for common models (GPT-4, GPT-3.5, Claude, etc.)
+
+**Design**:
+- ``CostCallback.get_stats()`` returns per-node and total costs
+- ``CostCallback.total_cost()`` returns aggregate cost
+- Custom pricing via ``CostCallback.set_pricing(model, input_price, output_price)``
+- Compatible with ``CallbackManager``
+
+**Tests**: 8 tests
+
+---
+
+## 2026-07-16 — Human-in-the-Loop Approval Patterns
+
+**What**: Enhanced interrupt/resume with approval workflows, timeouts, and
+decision handling.
+
+**Changes**:
+- ``graphforge/_interrupt.py`` — Enhanced ``interrupt()`` with ``timeout``
+  and ``on_timeout`` parameters.
+- ``graphforge/agents/patterns.py`` — Added ``ApprovalNode`` factory for
+  creating approval-required graph nodes.
+
+**Design**:
+- ``interrupt(timeout=..., on_timeout="reject")`` — interrupt with configurable
+  timeout behavior
+- ``ApprovalNode(fn, timeout=..., on_timeout=...)`` — wraps any node function
+  with an approval gate before execution
+- ``on_timeout="reject"`` (auto-reject), ``"approve"`` (auto-approve),
+  ``"raise"`` (raise error)
+- Resume passes approval decision via ``resume(updates={"decision": "approve"})``
+
+**Tests**: 8 tests
+
+---
+
+
+---
+
 ## Design Principles Applied
 
 Throughout these improvements, the following principles guided the work:

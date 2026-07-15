@@ -17,6 +17,7 @@
 from graphforge.agents._tool_node import ToolNode, ToolRegistry, has_tool_calls, ToolCall, ToolDef
 from graphforge.agents._react import ReactState, create_react_agent
 from graphforge.agents.patterns import (
+    ApprovalNode,
     SupervisorState,
     SwarmState,
     create_supervisor_worker,
@@ -37,4 +38,5 @@ __all__ = [
     "create_supervisor_worker",
     "create_swarm",
     "create_delegation_agent",
+    "ApprovalNode",
 ]

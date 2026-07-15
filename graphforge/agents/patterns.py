@@ -364,6 +364,70 @@ def create_delegation_agent(
 # ===================================================================
 
 
+
+# ===================================================================
+# ApprovalNode — wraps any node with human approval gate
+# ===================================================================
+
+
+def ApprovalNode(
+    fn: Callable[[Dict[str, Any]], Dict[str, Any]],
+    *,
+    timeout: Optional[float] = None,
+    on_timeout: str = "reject",
+    name: str = "approval",
+) -> Callable[[Any], Dict[str, Any]]:
+    """Wrap a node function with a human approval gate.
+
+    Before executing *fn*, the graph pauses and waits for human approval
+    via the ``interrupt()`` mechanism. The human can approve, reject, or
+    modify the inputs before the wrapped function runs.
+
+    Parameters
+    ----------
+    fn:
+        The underlying node function to execute after approval.
+    timeout:
+        Optional timeout in seconds.
+    on_timeout:
+        Action on timeout: ``"reject"`` (default), ``"approve"``, or ``"raise"``.
+    name:
+        Name for the approval node (default: ``"approval"``).
+
+    Returns
+    -------
+    A graph node function that requires approval before executing *fn*.
+
+    Examples
+    --------
+    .. code-block:: python
+
+        from graphforge.agents import ApprovalNode
+
+        def send_email(state):
+            # Send email
+            return {"sent": True}
+
+        # Wrap with approval gate
+        graph.add_node("send_email", ApprovalNode(send_email, timeout=3600))
+    """
+
+    def _approval_wrapper(state: Any) -> Dict[str, Any]:
+        state_dict = _state_to_dict(state)
+        # Pause for approval
+        from graphforge._interrupt import interrupt
+        interrupt(
+            message=f"Approve execution of {name}?",
+            value=state_dict,
+            timeout=timeout,
+            on_timeout=on_timeout,
+        )
+        # If resumed, execute the function
+        return fn(state_dict)
+
+    return _approval_wrapper
+
+
 def _state_to_dict(state: Any) -> Dict[str, Any]:
     """Convert a state object to a plain dictionary."""
     if hasattr(state, "model_dump"):
@@ -379,4 +443,5 @@ __all__ = [
     "create_supervisor_worker",
     "create_swarm",
     "create_delegation_agent",
+    "ApprovalNode",
 ]

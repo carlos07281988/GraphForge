@@ -32,6 +32,8 @@ def interrupt(
     *,
     message: str = "Execution interrupted",
     value: Any = None,
+    timeout: Optional[float] = None,
+    on_timeout: str = "reject",
 ) -> None:
     """Pause graph execution and wait for human input.
 
@@ -43,11 +45,18 @@ def interrupt(
         message: Human-readable description of the interruption.
         value: Optional data to pass to the caller (e.g. a question or
             context that helps the human provide input).
+        timeout: Optional timeout in seconds. If the execution is not
+            resumed within this time, the ``on_timeout`` action is taken.
+        on_timeout: Action on timeout (``"reject"``, ``"approve"``, ``"raise"``).
+            Default: ``"reject"``.
     """
-    raise GraphExecutionPaused(
-        message,
-        metadata={"interrupt_value": value} if value is not None else None,
-    )
+    meta: Dict[str, Any] = {}
+    if value is not None:
+        meta["interrupt_value"] = value
+    if timeout is not None:
+        meta["interrupt_timeout"] = timeout
+        meta["interrupt_on_timeout"] = on_timeout
+    raise GraphExecutionPaused(message, metadata=meta if meta else None)
 
 
 __all__ = ["interrupt"]
