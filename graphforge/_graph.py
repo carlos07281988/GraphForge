@@ -132,6 +132,7 @@ class Graph(Generic[StateT]):
         retry: int = 0,
         timeout: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        checkpoint: bool = True,
     ) -> Graph[StateT]:
         if name in self._nodes and self._nodes[name]._fn is not _placeholder_fn:
             raise ValueError(
@@ -140,7 +141,8 @@ class Graph(Generic[StateT]):
         if isinstance(fn, Node):
             node = fn
         else:
-            node = Node[StateT](name=name, fn=fn, retry=retry, timeout=timeout, metadata=metadata)
+            node = Node[StateT](name=name, fn=fn, retry=retry, timeout=timeout,
+                                metadata=metadata, checkpoint=checkpoint)
         self._nodes[name] = node
         logger.debug("add_node(%r): kind=%s", name, node.kind.value)
         return self
@@ -619,7 +621,11 @@ class CompiledGraph(Generic[StateT]):
         callbacks: Optional["CallbackManager"] = None,
         *,
         store: Optional[Any] = None,
+        configurable: Optional[Dict[str, Any]] = None,
     ) -> StateT:
+        # Apply configurable overrides before execution
+        if configurable and hasattr(input_state, 'apply'):
+            input_state = input_state.apply(**configurable)
         from graphforge._executor import SyncExecutor
         executor = SyncExecutor(callbacks=callbacks)
         return executor.execute(self, input_state, config=config, store=store)
@@ -631,7 +637,10 @@ class CompiledGraph(Generic[StateT]):
         callbacks: Optional["CallbackManager"] = None,
         *,
         store: Optional[Any] = None,
+        configurable: Optional[Dict[str, Any]] = None,
     ) -> StateT:
+        if configurable and hasattr(input_state, 'apply'):
+            input_state = input_state.apply(**configurable)
         from graphforge._executor import AsyncExecutor
         executor = AsyncExecutor(callbacks=callbacks)
         return await executor.execute(self, input_state, config=config, store=store)

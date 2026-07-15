@@ -85,15 +85,17 @@ class ReducerDescriptor:
     Attached to the Pydantic field via ``json_schema_extra={"reducer": ...}``.
     """
 
-    __slots__ = ("strategy", "func")
+    __slots__ = ("strategy", "func", "configurable")
 
     def __init__(
         self,
         strategy: MergeStrategy = MergeStrategy.OVERWRITE,
         func: Optional[Callable[[Any, Any], Any]] = None,
+        configurable: bool = False,
     ) -> None:
         self.strategy = strategy
         self.func = func
+        self.configurable = configurable
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +206,7 @@ def node_field(
     merge: Union[MergeStrategy, str] = MergeStrategy.OVERWRITE,
     reducer: Optional[Callable[[Any, Any], Any]] = None,
     description: str = "",
+    configurable: bool = False,
     **extra: Any,
 ) -> Any:
     """Declare a graph-state field with an explicit merge strategy.
@@ -240,7 +243,7 @@ def node_field(
             "A callable `reducer` is required when merge='reduce'."
         )
 
-    desc = ReducerDescriptor(strategy=merge, func=reducer)
+    desc = ReducerDescriptor(strategy=merge, func=reducer, configurable=configurable)
     return Field(
         default=default,
         description=description,

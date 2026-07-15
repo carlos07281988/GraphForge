@@ -90,7 +90,7 @@ class Node(Generic[StateT]):
         Optional arbitrary metadata (tags, version, etc.).
     """
 
-    __slots__ = ("_name", "_fn", "_kind", "_retry", "_timeout", "_metadata")
+    __slots__ = ("_name", "_fn", "_kind", "_retry", "_timeout", "_metadata", "_checkpoint")
 
     def __init__(
         self,
@@ -107,6 +107,7 @@ class Node(Generic[StateT]):
         retry: int = 0,
         timeout: Optional[float] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        checkpoint: bool = True,
     ) -> None:
         self._name = name
         self._fn = fn
@@ -114,6 +115,7 @@ class Node(Generic[StateT]):
         self._retry = retry
         self._timeout = timeout
         self._metadata = metadata or {}
+        self._checkpoint = checkpoint
         logger.debug("Node %r: kind=%s", name, self._kind.value)
 
     # -- read-only properties -----------------------------------------------
@@ -129,6 +131,11 @@ class Node(Generic[StateT]):
     @property
     def metadata(self) -> Dict[str, Any]:
         return dict(self._metadata)
+
+    @property
+    def checkpoint(self) -> bool:
+        """Whether this node should be checkpointed."""
+        return self._checkpoint
 
     @property
     def retry(self) -> int:
@@ -332,4 +339,5 @@ def _classify(
 __all__ = [
     "Node",
     "NodeKind",
+    "STREAM_TOKEN",
 ]

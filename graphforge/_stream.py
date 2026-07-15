@@ -67,6 +67,9 @@ class EventType(str, Enum):
     GRAPH_START = "graph_start"
     """Graph execution started."""
 
+    STREAM_TOKEN = "stream_token"
+    """A single token emitted by a streaming node (e.g., LLM token)."""
+
     GRAPH_END = "graph_end"
     """Graph execution finished."""
 

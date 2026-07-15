@@ -475,6 +475,182 @@ the same state field.
 
 ---
 
+## 2026-07-16 — v0.3.0 Feature Implementation
+
+**What**: Final round of feature implementation covering remaining gaps from
+the Gap Analysis: token-level streaming, WebSocket, checkpoint skipping,
+configuration system, managed values, background execution, CLI, state middleware.
+
+---
+
+## 2026-07-16 — Token-Level Streaming (Generator Nodes)
+
+**What**: Executor now properly supports generator nodes — nodes declared as
+generator functions that ``yield`` intermediate state updates (e.g., LLM
+token-by-token output).
+
+**Changes**:
+- ``graphforge/_executor.py`` — ``SyncExecutor.stream()`` and ``AsyncExecutor.stream()``
+  now detect generator nodes and call ``node.stream()`` / ``node.astream()``
+  instead of ``node.invoke()``.
+- ``graphforge/_stream.py`` — Added ``STREAM_TOKEN`` event type for individual
+  token emissions.
+- ``graphforge/_node.py`` — Ensure ``Node.stream()`` / ``astream()`` are
+  properly dispatched by the executor.
+
+**Design**:
+- Executor inspects ``node.kind``: when ``STREAM`` or ``ASYNC_STREAM``,
+  it calls the streaming method and yields each intermediate update
+- Users write ``def my_node(state): yield update1; yield update2``
+- The ``STREAM_TOKEN`` event allows fine-grained UI updates (typewriter effect)
+
+**Tests**: 8 tests (sync generator, async generator, token events, mixed)
+
+---
+
+## 2026-07-16 — WebSocket Streaming Endpoint
+
+**What**: GraphServer now exposes a WebSocket endpoint for bidirectional
+real-time communication with graph executions.
+
+**Changes**:
+- ``graphforge/_http_server.py`` — Added ``/ws`` WebSocket endpoint.
+- WebSocket messages follow the same ``StreamEvent`` format as SSE.
+
+**Design**:
+- Uses ``aiohttp.web.WebSocketResponse``
+- Client sends JSON ``{"state": ..., "config": ...}`` to start execution
+- Server streams ``StreamEvent`` objects as JSON lines
+- Supports client disconnect handling
+
+**Tests**: 3 tests (connect, stream, disconnect)
+
+---
+
+## 2026-07-16 — Node-Level Checkpoint Skipping
+
+**What**: Nodes can now opt out of checkpointing by setting
+``checkpointer=False``, avoiding unnecessary I/O for pure functions.
+
+**Changes**:
+- ``graphforge/_node.py`` — Added ``checkpoint`` property to ``Node``.
+- ``graphforge/_graph.py`` — ``Graph.add_node()`` accepts
+  ``checkpoint=True`` parameter.
+- ``graphforge/_executor.py`` — Executor skips ``checkpointer.put()``
+  for nodes with ``checkpoint=False``.
+
+**Design**:
+- Default ``True`` (backward compatible)
+- Pure transform nodes (formatting, validation) can set ``checkpoint=False``
+
+**Tests**: 4 tests (skip, default true, streaming with skip)
+
+---
+
+## 2026-07-16 — Configuration System (Configurable Fields)
+
+**What**: State fields can now be marked as ``configurable``, allowing the
+same compiled graph to be reused with different configuration values
+without recompiling.
+
+**Changes**:
+- ``graphforge/state.py`` — ``node_field()`` now accepts ``configurable``
+  parameter.
+- ``graphforge/_graph.py`` — ``CompiledGraph.invoke()`` accepts a
+  ``configurable`` dict that overrides configurable field values.
+
+**Design**:
+- Fields marked ``configurable=True`` can be overridden via
+  ``invoke(state, configurable={"model": "gpt-4"})``
+- Configurable values are merged into state before the first node runs
+- Backward compatible — existing fields default ``configurable=False``
+
+**Tests**: 5 tests
+
+---
+
+## 2026-07-16 — Managed Values (Parallel Branch Shared State)
+
+**What**: Added managed values — shared state between parallel branches
+that is automatically merged when branches converge.
+
+**Changes**:
+- ``graphforge/_edge.py`` — ``FanOutEdge.managed_values`` property
+- ``graphforge/_executor.py`` — Executor tracks managed values across
+  parallel branches and merges them at join points.
+
+**Design**:
+- Managed values are declared per fan-out edge
+- Each branch can read and write managed values
+- At join, managed values are merged using the field's merge strategy
+- Separate from regular state — only appears in parallel contexts
+
+**Tests**: 4 tests
+
+---
+
+## 2026-07-16 — Background Execution
+
+**What**: Simple background task execution system for running graphs
+in separate threads with status tracking.
+
+**Changes**:
+- ``graphforge/background.py`` — new module with ``BackgroundTaskRunner``
+  and ``BackgroundTask`` classes.
+
+**Design**:
+- ``BackgroundTaskRunner.submit(graph, state) -> BackgroundTask``
+- Tasks run in a thread pool
+- Status tracking: pending/running/done/failed
+- ``task.result()`` blocks until complete
+- ``task.cancel()`` uses the Cancellation API
+
+**Tests**: 6 tests
+
+---
+
+## 2026-07-16 — CLI Tool
+
+**What**: Basic command-line interface for common GraphForge operations.
+
+**Changes**:
+- ``graphforge/cli.py`` — new module with CLI using ``argparse``.
+
+**Commands**:
+- ``graphforge run <graph.json> <state.json>`` — invoke a serialized graph
+- ``graphforge viz <graph.json>`` — export graph visualization
+- ``graphforge info <graph.json>`` — show graph topology info
+
+**Tests**: 4 tests (argparse parsing, mock runs)
+
+---
+
+## 2026-07-16 — State Middleware
+
+**What**: Pre- and post-processing hooks for state transitions, allowing
+global interceptors for logging, validation, and transformation.
+
+**Changes**:
+- ``graphforge/_middleware.py`` — new module with ``StateMiddleware``
+  Protocol and ``MiddlewarePipeline``.
+- ``graphforge/_executor.py`` — Executor calls middleware hooks before
+  and after each state update.
+
+**Design**:
+- ``StateMiddleware.pre_update(node, state, updates) -> updates``
+- ``StateMiddleware.post_update(node, old_state, new_state) -> None``
+- ``MiddlewarePipeline(stages: List[StateMiddleware])`` composes multiple
+  middlewares in order.
+- Middleware can modify updates before they are applied (e.g., logging,
+  validation, encryption).
+
+**Tests**: 5 tests
+
+---
+
+
+---
+
 ## Design Principles Applied
 
 Throughout these improvements, the following principles guided the work:

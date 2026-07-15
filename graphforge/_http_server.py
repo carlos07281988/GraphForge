@@ -69,6 +69,7 @@ class GraphServer:
         app = web.Application()
         app.router.add_post("/invoke", self._handle_invoke)
         app.router.add_post("/stream", self._handle_stream)
+        app.router.add_get("/ws", self._handle_websocket)
         app.router.add_get("/health", self._handle_health)
         return app
 
@@ -123,6 +124,37 @@ class GraphServer:
         await self.stop()
 
     # -- routes -------------------------------------------------------------
+
+    async def _handle_websocket(self, request: web.Request) -> web.WebSocketResponse:
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        async for msg in ws:
+            if msg.type == web.WSMsgType.TEXT:
+                try:
+                    data = json.loads(msg.data)
+                    state_data = data.get("state", {})
+                    config_data = data.get("config", {})
+
+                    state_type = self._graph.state_type
+                    if state_type is not None:
+                        state = state_type.model_validate(state_data)
+                    else:
+                        state = state_data
+
+                    async for event in self._graph.astream(state, config=config_data):
+                        payload = {
+                            "type": event.type.value,
+                            "node": event.node or "",
+                            "data": str(event.data) if event.data else "",
+                        }
+                        await ws.send_json(payload)
+                except Exception as exc:
+                    await ws.send_json({"error": str(exc)})
+            elif msg.type == web.WSMsgType.ERROR:
+                break
+
+        return ws
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         return web.json_response({"status": "ok", "graph": self._graph.name})

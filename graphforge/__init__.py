@@ -90,6 +90,7 @@ from graphforge.store import Store, InMemoryStore
 from graphforge.store_redis import RedisStore
 # MapReduce
 from graphforge._map_reduce import MapReduce
+from graphforge.background import BackgroundTaskRunner, BackgroundTask, TaskStatus
 
 
 __all__ = [
@@ -187,6 +188,13 @@ __all__.extend([
     "json_match",
     "PostgresCheckpointer",
 ])
+
+__all__.extend([
+    "BackgroundTaskRunner",
+    "BackgroundTask",
+    "TaskStatus",
+])
+
 __all__.sort()
 __all__.extend(["__version__", "__version_info__",
     "GraphExecutionPaused", "SqliteCheckpointer"])

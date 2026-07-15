@@ -52,6 +52,7 @@ from graphforge._types import (
 )
 import threading
 from graphforge.state import GraphState, _build_reducer_map, merge_state
+from graphforge._middleware import MiddlewarePipeline
 
 
 
@@ -120,13 +121,15 @@ class GraphExecutionPaused(Exception):
 class SyncExecutor:
     """Synchronous graph executor."""
 
-    __slots__ = ("_callbacks",)
+    __slots__ = ("_callbacks", "_middleware")
 
     def __init__(
         self,
         callbacks: Optional["CallbackManager"] = None,
+        middleware: Optional["MiddlewarePipeline"] = None,
     ) -> None:
         self._callbacks = callbacks or CallbackManager()
+        self._middleware = middleware
 
     def execute(
         self,
@@ -136,6 +139,7 @@ class SyncExecutor:
         *,
         start_node: Optional[NodeName] = None,
         store: Optional[Any] = None,
+        middleware: Optional["MiddlewarePipeline"] = None,
     ) -> StateT:
         config = config or {}
         recursion_limit = config.get("recursion_limit", DEFAULT_RECURSION_LIMIT)
@@ -185,8 +189,17 @@ class SyncExecutor:
             logger.debug("State before %r: %s", node_name, _dump(state))
             self._callbacks.on_node_start(node_name, _dump(state))
             try:
-                # Pass store to node if it accepts the parameter
-                if store is not None and _node_accepts_param(node, 'store'):
+                # Support generator/streaming nodes in execute
+                if node.kind == NodeKind.STREAM:
+                    all_updates: Dict[str, Any] = {}
+                    for partial in node.stream(state):
+                        all_updates.update(partial)
+                    updates = all_updates
+                elif node.kind == NodeKind.ASYNC_STREAM:
+                    raise TypeError(
+                        f"Node '{node_name}' is async stream; use ainvoke/astream."
+                    )
+                elif store is not None and _node_accepts_param(node, 'store'):
                     updates = node.invoke(state, store=store)
                 else:
                     updates = node.invoke(state)
@@ -205,7 +218,12 @@ class SyncExecutor:
                     logger.info("Node %r failed (attempt 1/%d), retrying...", node_name, node.retry + 1)
                     for attempt in range(1, node.retry + 1):
                         try:
-                            if store is not None and _node_accepts_param(node, 'store'):
+                            if node.kind == NodeKind.STREAM:
+                                all_updates = {}
+                                for partial in node.stream(state):
+                                    all_updates.update(partial)
+                                updates = all_updates
+                            elif store is not None and _node_accepts_param(node, 'store'):
                                 updates = node.invoke(state, store=store)
                             else:
                                 updates = node.invoke(state)
@@ -253,12 +271,22 @@ class SyncExecutor:
                 step += 1
                 continue
             logger.debug("Node %r produced updates: %s", node_name, list(updates.keys()))
+            # Middleware: pre-update hook
+            mw = self._middleware
+            if mw is not None:
+                updates = mw.pre_update(node_name, _dump(state), updates)
+
             new_state = _apply(state, updates)
+
+            # Middleware: post-update hook
+            if mw is not None:
+                mw.post_update(node_name, _dump(state), _dump(new_state))
+
             logger.debug("State after %r: %s", node_name, _dump(new_state))
             self._callbacks.on_state_update(node_name, updates, _dump(new_state))
             self._callbacks.on_node_end(node_name, _dump(new_state))
 
-            if checkpointer is not None:
+            if checkpointer is not None and node.checkpoint:
                 key = (thread_id, node_name, step)
                 checkpointer.put(key, _dump(new_state), parent_key=parent_key)
                 parent_key = key
@@ -319,7 +347,35 @@ class SyncExecutor:
                 EventType.NODE_START, node=node_name, data=_dump(state), step=step
             )
             try:
-                updates = node.invoke(state)
+                # Support generator/streaming nodes in stream mode
+                if node.kind == NodeKind.STREAM:
+                    for partial in node.stream(state):
+                        updates = partial
+                        mw = self._middleware
+                        if mw is not None:
+                            updates = mw.pre_update(node_name, _dump(state), updates)
+                        new_state = _apply(state, updates)
+                        yield StreamEvent(
+                            EventType.STREAM_TOKEN,
+                            node=node_name,
+                            data={"token": updates},
+                            step=step,
+                        )
+                        state = new_state
+                    # After all tokens, signal node end with final state
+                    yield StreamEvent(
+                        EventType.NODE_END, node=node_name, data=_dump(state), step=step
+                    )
+                    if checkpointer is not None and node.checkpoint:
+                        key = (thread_id, node_name, step)
+                        checkpointer.put(key, _dump(state), parent_key=parent_key)
+                        parent_key = key
+                    step += 1
+                    next_name = self._resolve_next(graph, node_name, state)
+                    node_name = next_name
+                    continue
+                else:
+                    updates = node.invoke(state)
             except GraphExecutionPaused as pause:
                 logger.info("Stream: Node %r paused execution: %s", node_name, pause.message)
                 yield StreamEvent(
@@ -345,7 +401,15 @@ class SyncExecutor:
                 )
                 raise
 
+            mw = self._middleware
+            if mw is not None:
+                updates = mw.pre_update(node_name, _dump(state), updates)
+
             new_state = _apply(state, updates)
+
+            if mw is not None:
+                mw.post_update(node_name, _dump(state), _dump(new_state))
+
             yield StreamEvent(
                 EventType.STATE_UPDATE,
                 node=node_name,
@@ -356,7 +420,7 @@ class SyncExecutor:
                 EventType.NODE_END, node=node_name, data=_dump(new_state), step=step
             )
 
-            if checkpointer is not None:
+            if checkpointer is not None and node.checkpoint:
                 key = (thread_id, node_name, step)
                 checkpointer.put(key, _dump(new_state), parent_key=parent_key)
                 parent_key = key
@@ -570,13 +634,15 @@ class SyncExecutor:
 class AsyncExecutor:
     """Asynchronous graph executor."""
 
-    __slots__ = ("_callbacks",)
+    __slots__ = ("_callbacks", "_middleware")
 
     def __init__(
         self,
         callbacks: Optional["CallbackManager"] = None,
+        middleware: Optional["MiddlewarePipeline"] = None,
     ) -> None:
         self._callbacks = callbacks or CallbackManager()
+        self._middleware = middleware
 
     async def execute(
         self,
@@ -628,6 +694,11 @@ class AsyncExecutor:
             try:
                 if node.kind == NodeKind.ASYNC:
                     updates = await node.ainvoke(state)
+                elif node.kind == NodeKind.ASYNC_STREAM:
+                    all_updates = {}
+                    async for partial in node.astream(state):
+                        all_updates.update(partial)
+                    updates = all_updates
                 else:
                     updates = node.invoke(state)
             except GraphExecutionPaused as pause:
@@ -700,6 +771,11 @@ class AsyncExecutor:
             try:
                 if node.kind == NodeKind.ASYNC:
                     updates = await node.ainvoke(state)
+                elif node.kind == NodeKind.ASYNC_STREAM:
+                    all_updates = {}
+                    async for partial in node.astream(state):
+                        all_updates.update(partial)
+                    updates = all_updates
                 else:
                     updates = node.invoke(state)
             except Exception as exc:
@@ -712,7 +788,15 @@ class AsyncExecutor:
                 )
                 raise
 
+            mw = self._middleware
+            if mw is not None:
+                updates = mw.pre_update(node_name, _dump(state), updates)
+
             new_state = _apply(state, updates)
+
+            if mw is not None:
+                mw.post_update(node_name, _dump(state), _dump(new_state))
+
             yield StreamEvent(
                 EventType.STATE_UPDATE,
                 node=node_name,
@@ -723,7 +807,7 @@ class AsyncExecutor:
                 EventType.NODE_END, node=node_name, data=_dump(new_state), step=step
             )
 
-            if checkpointer is not None:
+            if checkpointer is not None and node.checkpoint:
                 key = (thread_id, node_name, step)
                 checkpointer.put(key, _dump(new_state), parent_key=parent_key)
                 parent_key = key

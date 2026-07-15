@@ -147,7 +147,7 @@ class ConditionalEdge(Generic[StateT]):
 class FanOutEdge(Generic[StateT]):
     """A fan-out edge that spawns multiple parallel branches."""
 
-    __slots__ = ("source", "targets", "join", "conflict")
+    __slots__ = ("source", "targets", "join", "conflict", "managed_values")
 
     def __init__(
         self,
@@ -156,6 +156,7 @@ class FanOutEdge(Generic[StateT]):
         join: Optional[NodeName] = None,
         *,
         conflict: Optional[Union[On, str]] = None,
+        managed_values: Optional[List[str]] = None,
     ) -> None:
         assert source, "source must be a non-empty string"
         assert targets, "targets must be a non-empty list"
@@ -163,6 +164,7 @@ class FanOutEdge(Generic[StateT]):
         self.targets = list(targets)
         self.join = join
         self.conflict = On(conflict) if isinstance(conflict, str) else conflict
+        self.managed_values = managed_values or []
 
     def __repr__(self) -> str:
         return (

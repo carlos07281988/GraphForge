@@ -841,6 +841,136 @@ raising ``GraphExecutionPaused``.
 ---
 
 
+## Token-Level Streaming (Generator Nodes)
+
+Nodes can now be generator functions that ``yield`` intermediate state updates, enabling
+token-by-token LLM output streaming (typewriter effect):
+
+```python
+def token_generator(state):
+    """Generator node that yields tokens one by one."""
+    for token in ["Hello", " ", "World"]:
+        yield {"output": token}
+
+graph.add_node("stream_gen", token_generator)
+
+# In stream mode, each yield becomes a STREAM_TOKEN event
+for event in compiled.stream(state, stream_mode="events"):
+    if event.type == EventType.STREAM_TOKEN:
+        print(event.data)  # {"token": {"output": "Hello"}}, etc.
+```
+
+Generator nodes work in both ``invoke()`` (collects all yields) and ``stream()``
+(emits individual ``STREAM_TOKEN`` events per yield).
+
+---
+
+## WebSocket Streaming Endpoint
+
+The ``GraphServer`` now exposes a WebSocket endpoint for bidirectional real-time
+communication:
+
+```python
+from graphforge._http_server import GraphServer
+
+server = GraphServer(compiled_graph, host="0.0.0.0", port=8080)
+server.run()  # Now also supports ws://host:port/ws
+```
+
+Connect via WebSocket:
+```json
+// Send: {"state": {...}, "config": {...}}
+// Receive: {"type": "node_start", "node": "a", "data": "..."}
+```
+
+---
+
+## Node-Level Checkpoint Skipping
+
+Pure function nodes can skip checkpointing for performance:
+
+```python
+# 'transform' will NOT be checkpointed
+graph.add_node("transform", clean_data, checkpoint=False)
+
+# Default is True (backward compatible)
+graph.add_node("llm_call", call_llm, checkpoint=True)
+```
+
+---
+
+## Configuration System (Configurable Fields)
+
+Override state field values at invocation time without recompiling:
+
+```python
+result = compiled.invoke(
+    MyState(),
+    configurable={"model": "gpt-4", "temperature": 0.9},
+)
+```
+
+Configurable values are merged into the state before the first node executes.
+
+---
+
+## Background Task Execution
+
+Run graphs in background threads with status tracking:
+
+```python
+from graphforge.background import BackgroundTaskRunner
+
+runner = BackgroundTaskRunner(max_workers=4)
+task = runner.submit(compiled_graph, input_state)
+
+# Check status, wait for result
+task.wait(timeout=30)
+print(task.status)  # "completed" | "failed"
+print(task.result)
+
+# List all tasks
+for t in runner.list_tasks():
+    print(t.task_id, t.status)
+```
+
+---
+
+## CLI Tool
+
+Basic command-line interface for common operations:
+
+```bash
+python -m graphforge.cli info graph.json      # Show topology
+python -m graphforge.cli viz graph.json       # Export visualization
+python -m graphforge.cli run graph.json state.json  # Run graph
+```
+
+---
+
+## State Middleware
+
+Pre- and post-processing hooks for state transitions:
+
+```python
+from graphforge._middleware import MiddlewarePipeline, StateMiddleware
+
+class LoggingMiddleware:
+    def pre_update(self, node, state, updates):
+        print(f"{node}: updating {list(updates.keys())}")
+        return updates
+
+    def post_update(self, node, old_state, new_state):
+        print(f"{node}: state changed")
+
+pipeline = MiddlewarePipeline([LoggingMiddleware()])
+compiled.invoke(state, callbacks=CallbackManager([], middleware=pipeline))
+```
+
+---
+
+
+
 ## Execution Modes
 
 ### Invoke
