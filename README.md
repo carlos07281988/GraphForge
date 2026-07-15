@@ -237,6 +237,24 @@ compiled = graph.compile(state_type=ReactState)
 result = compiled.invoke(ReactState(messages=[{"role": "user", "content": "Hi"}]))
 ```
 
+### Streaming ReAct
+
+ToolNode supports generator LLM functions for token-level streaming within the
+ReAct loop:
+
+```python
+# LLM function as a generator
+def streaming_llm(messages, tools):
+    for token in ["Hello", " ", "World"]:
+        yield {"content": token, "tool_calls": []}
+
+graph.add_node("agent", ToolNode(streaming_llm, tools=tools))
+# Works with the same ReAct graph structure
+```
+
+The ToolNode automatically detects generator LLM functions and accumulates
+their yielded tokens into a complete response.
+
 ### ToolNode
 
 ```python
@@ -516,6 +534,33 @@ store.add_texts(chunks)
 
 ---
 
+
+## Multi-Modal (Image Support)
+
+Process images in agent workflows with built-in image nodes:
+
+```python
+from graphforge.multimodal import ImageNode, load_image, image_to_base64
+
+# Create an image processing node
+image_node = ImageNode(input_field="image_url", output_field="processed_image")
+graph.add_node("process_img", image_node)
+
+# Load images from file or URL
+b64 = load_image("path/to/image.png")
+
+# Convert PIL images to base64
+b64 = image_to_base64(pil_image, format="PNG")
+```
+
+**Features**:
+- Base64 data URI input/output
+- Local file and HTTP URL loading
+- Optional PIL/Pillow integration for resize and transform
+- Compatible with multi-modal LLM API formats (OpenAI image_url, Anthropic image)
+
+---
+
 ## Developer Tools
 
 ### TimelineRecorder — Execution Debugger
@@ -610,6 +655,25 @@ python -m graphforge.cli run graph.json state.json  # Run graph
 
 ## Deployment
 
+
+### Agent UI Dashboard
+
+Every compiled graph automatically gets a web-based dashboard at ``GET /dashboard``:
+
+```python
+from graphforge import serve
+
+serve(compiled_graph)  # Visit http://localhost:8080/dashboard
+```
+
+The dashboard shows:
+- **Graph topology** visualized with Mermaid.js
+- **Node list** with names and status
+- **State editor** — edit and submit input JSON
+- **Real-time execution** with results display
+- **Dark theme** matching the logo design
+
+
 ### serve() — One-Command API Server
 
 Turn any compiled graph into a production-ready API server with one function call:
@@ -640,6 +704,27 @@ from graphforge.a2a import A2AServer
 server = A2AServer(compiled_graph, host="0.0.0.0", port=8081)
 server.run()
 ```
+
+
+### Distributed Execution
+
+Execute graph nodes across multiple threads or processes:
+
+```python
+from graphforge.distributed import DistributedExecutor
+
+# Thread pool execution
+executor = DistributedExecutor(max_workers=4)
+result = executor.execute(compiled_graph, input_state)
+
+# Or for CPU-intensive nodes:
+executor = DistributedExecutor(executor_type="process")
+result = executor.execute(compiled_graph, input_state)
+
+# Execute individual functions in parallel
+results = executor.execute_parallel([fn1, fn2], [state1, state2])
+```
+
 
 ### MCP Integration
 

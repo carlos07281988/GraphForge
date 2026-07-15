@@ -175,8 +175,22 @@ def ToolNode(
         if not isinstance(messages, list):
             messages = []
 
-        # Call LLM
-        response = llm_func(messages, registry.get_definitions())
+        # Call LLM (support both sync and generator functions)
+        import inspect
+        if inspect.isgeneratorfunction(llm_func):
+            # Streaming LLM: process tokens one by one
+            full_content = ""
+            tool_calls_accumulated = []
+            for partial in llm_func(messages, registry.get_definitions()):
+                content = partial.get("content", "")
+                tc = partial.get("tool_calls", [])
+                if content:
+                    full_content += content
+                if tc:
+                    tool_calls_accumulated.extend(tc)
+            response = {"content": full_content, "tool_calls": tool_calls_accumulated}
+        else:
+            response = llm_func(messages, registry.get_definitions())
         content = response.get("content", "")
         raw_tool_calls = response.get("tool_calls", [])
 

@@ -71,6 +71,8 @@ class GraphServer:
         app.router.add_post("/stream", self._handle_stream)
         app.router.add_get("/ws", self._handle_websocket)
         app.router.add_get("/health", self._handle_health)
+        app.router.add_get("/info", self._handle_info)
+        app.router.add_get("/dashboard", self._handle_dashboard)
         return app
 
     # -- lifecycle ----------------------------------------------------------
@@ -155,6 +157,25 @@ class GraphServer:
                 break
 
         return ws
+
+    async def _handle_info(self, request: web.Request) -> web.Response:
+        node_names = list(self._graph.nodes.keys())
+        edges = []
+        for name in node_names:
+            for succ in self._graph.successors(name):
+                edges.append([name, succ] if succ else [name, None])
+        return web.json_response({
+            "name": self._graph.name,
+            "nodes": len(node_names),
+            "node_names": node_names,
+            "edges": edges,
+            "entry": self._graph.entry_point,
+        })
+
+    async def _handle_dashboard(self, request: web.Request) -> web.Response:
+        from graphforge._dashboard import get_dashboard_html
+        html = get_dashboard_html()
+        return web.Response(text=html, content_type="text/html")
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         return web.json_response({"status": "ok", "graph": self._graph.name})

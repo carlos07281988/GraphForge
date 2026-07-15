@@ -804,6 +804,89 @@ post-mortem debugging, replay, and inspection.
 
 ---
 
+## 2026-07-16 — v0.6.0 — 最终轮: ReAct 流式, 多模态, Agent UI, 分布式
+
+---
+
+## 2026-07-16 — ReAct 循环内流式
+
+**What**: ToolNode 和 ReAct agent 现在支持 generator 形式的 LLM 函数，
+实现 token 级流式输出。
+
+**Changes**:
+- ``graphforge/agents/_tool_node.py`` — ToolNode 检测 LLM 函数是否为
+  generator，若是则逐个 token 处理
+- ``graphforge/agents/_react.py`` — create_react_agent 支持流式模式
+
+**Design**:
+- LLM 函数可以是 ``def llm(messages, tools): yield token``
+- ToolNode 自动检测并逐 token 处理
+- 与现有的 EventType.STREAM_TOKEN 集成
+- 兼容非流式 LLM 函数（向下兼容）
+
+**Tests**: 6 tests
+
+---
+
+## 2026-07-16 — 多模态支持 (Image)
+
+**What**: 新增多模态模块，支持 agent 处理图片输入和生成图片输出。
+
+**Changes**:
+- ``graphforge/multimodal/`` — 新模块
+- ``graphforge/multimodal/_image.py`` — ImageNode 支持图片输入/输出
+- ``graphforge/multimodal/__init__.py`` — 公开 API
+
+**Design**:
+- ``ImageNode`` — 图片处理节点：base64 输入/输出，URL 加载，尺寸调整
+- 兼容 OpenAI 的 image_url 格式（多模态 LLM）
+- 无外部依赖（标准库 PIL 可选增强）
+
+**Tests**: 6 tests
+
+---
+
+## 2026-07-16 — Auto-Generated Agent Web UI
+
+**What**: 任意 CompiledGraph 自动生成可交互的 Web Dashboard，
+显示图结构、节点状态、实时执行。
+
+**Changes**:
+- ``graphforge/_dashboard.py`` — 内嵌 HTML/CSS/JS 的 Web Dashboard
+- ``graphforge/_http_server.py`` — GraphServer 添加 GET /dashboard 端点
+
+**Design**:
+- Python 生成单个 HTML 页面（无外部依赖）
+- 使用现有 REST API 执行 graph
+- Mermaid.js 渲染图拓扑（CDN 加载）
+- 实时显示执行状态和结果
+- 完全的暗色主题（匹配 logo 风格）
+
+**Tests**: 3 tests
+
+---
+
+## 2026-07-16 — 分布式执行 (Thread Pool)
+
+**What**: 分布式图执行支持，允许节点在远程 worker 上执行。
+
+**Changes**:
+- ``graphforge/distributed.py`` — 新模块，基于 concurrent.futures 的
+  分布式执行器
+
+**Design**:
+- ``DistributedExecutor`` — 将节点分发到远程 worker 执行
+- 支持本地线程池、进程池、Future-based 远程执行
+- 兼容现有的 Checkpointer 和 Store
+- 零额外依赖（标准库 concurrent.futures）
+
+**Tests**: 4 tests
+
+---
+
+
+---
+
 ## Design Principles Applied
 
 Throughout these improvements, the following principles guided the work:
